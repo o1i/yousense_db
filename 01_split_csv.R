@@ -13,7 +13,9 @@ while(length(test_data <- readLines(testcon, batchsize)) > 0 &
   categories <- sapply(vectors, function(v)v[3])
   # soll_laenge <- sapply(col_headers[categories], length)
   vectors_padded <- lapply(vectors, function(v_){
-    c(v_, rep(NA, length(col_headers[[v_[3]]]) - length(v_)))
+    v <- c(v_, rep(NA, length(col_headers[[v_[3]]]) - length(v_)))
+    v[v == ""] <- NA
+    return(v)
   })
   # ist_laenge <- sapply(vectors_padded, length)
   different_categories <- unique(categories)
@@ -24,7 +26,7 @@ while(length(test_data <- readLines(testcon, batchsize)) > 0 &
       write.table(to_append, 
                   file = file.path(sand_path, paste0(name_, '.csv')), 
                   append = T,
-                  sep = ',', na = 'NULL', row.names = F, 
+                  sep = ',', na = '\\N', row.names = F, 
                   col.names = !file.exists(file.path(sand_path, 
                                                      paste0(name_, '.csv'))))
       return(NULL)
