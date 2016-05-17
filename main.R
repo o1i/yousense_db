@@ -12,6 +12,9 @@ source("00_defs_funcs.R")
 
 # --- Stuff is happening -------------------------------------------------------
 # source("01_split_csv.R")
+# source("02_initialise_and_fill_db.R")
+# source("zz_presentation_queries.R")
+
 
 
 

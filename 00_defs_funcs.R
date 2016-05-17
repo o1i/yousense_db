@@ -98,6 +98,7 @@ connect <- function(user = "burkhard", pw = "", dbname = "burkhard",
   con <<- dbConnect(drv, dbname = dbname,
                     host = host, port = port,
                     user = user, password = pw)
+  dbGetQuery(con, "SET TIME ZONE 'UTC';")
 }
 
 # --- Importing a csv-file -----------------------------------------------------
@@ -121,10 +122,15 @@ CREATE TABLE", table_name, "(
   tryCatch({
     dbGetQuery(con, query_copy)
     if("milisec" %in% namelist_[[name_]]){
-      q <- paste("ALTER TABLE", table_name, "ADD COLUMN t timestamp;
-               UPDATE", table_name, "SET t = TO_TIMESTAMP(milisec::double 
+      q <- paste0("ALTER TABLE ", table_name, 
+               " ADD COLUMN t timestamp with time zone;
+               UPDATE ", table_name, " SET t = TO_TIMESTAMP(milisec::double 
                  precision / 1000);
-               ALTER TABLE", table_name, "DROP COLUMN milisec;")
+               ALTER TABLE ", table_name, " ALTER COLUMN uid 
+                  SET DATA TYPE numeric USING uid::numeric;
+               ALTER TABLE ", table_name, " DROP COLUMN milisec;
+               CREATE INDEX ", table_name, "_idx_t ON ", table_name, " (t);
+               CREATE INDEX ", table_name, "_idx_uid ON ", table_name, " (uid);")
       dbGetQuery(con, q)}},
     error = function(e) {
       print("Upload failed.")
