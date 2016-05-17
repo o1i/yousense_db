@@ -84,6 +84,7 @@ col_headers <- list(
 
 # --- Connecting to DB ---------------------------------------------------------
 disconnect <- function(){
+  library(RPostgreSQL)
   # This function disconnects from the database
   dbDisconnect(con)
   dbUnloadDriver(drv)
@@ -93,6 +94,7 @@ connect <- function(user = "burkhard", pw = "", dbname = "burkhard",
                     host = "localhost", port = 5432){
   # This function connects to the database with the given credentials
   # It assigns the relevant variables to the global environment
+  library(RPostgreSQL)
   try(disconnect(), silent = T)
   drv <<- dbDriver("PostgreSQL")
   con <<- dbConnect(drv, dbname = dbname,
@@ -224,13 +226,14 @@ dbWriteSpatial <- function(con, spatial.df, schemaname="public", tablename,
 # --- Functions for the presentation -------------------------------------------
 
 naive_segmentation <- function(df, dt, dsp, dt_break, dt_short, ds_short){
-  # df data frame with (ordered) points. contains t, x and y
-  # dt time threshold for first segmentation
-  # dsp spatial threshold for first segmentation
-  # dt_break time threshold to split a move segment if distance between two
-  #   points is too large
-  # dt_short time threshold for too short moves
-  # ds_short spatial threshold for too short moves
+  # df        data frame with (ordered) points. contains t, x and y
+  # dt        time threshold for first segmentation
+  # dsp       spatial threshold for first segmentation
+  # dt_break  time threshold to split a move segment if distance between two
+  #            points is too large
+  # dt_short  time threshold for too short moves
+  # ds_short  spatial threshold for too short moves
+  
   library(plyr)
   library(geosphere)
   df <- df[order(df$t), ]
@@ -310,10 +313,11 @@ naive_segmentation <- function(df, dt, dsp, dt_break, dt_short, ds_short){
 # --- Simplification -----------------------------------------------------------
 # Gets simple summary statistics for each segment
 # Sticks together adjacent stop segments that are "too close"
-naive_simplification <- function(df, ds){
+naive_simplification <- function(df, ds, simplify_stops = 0){
   df <- df[order(df$t), ]
   segments <- ddply(df, "segment", function(df_){
-    return(data.frame(tmin = df_[1, "t"],
+    return(data.frame(gps_id = df_[1, "gps_id"],
+                      tmin = df_[1, "t"],
                       tmax = df_[nrow(df_), "t"],
                       stop = df_[1, "stop"],
                       x_mean = mean(df_[, "x"]),
@@ -346,10 +350,30 @@ naive_simplification <- function(df, ds){
     }
   }
   seg2 <- seg2[1:j_, ]
+  if(simplify_stops > 0){
+    library(dbscan)
+    library(plyr)
+    stops <- spTransform(SpatialPoints(subset(seg2, 
+                                              stop)[, c("x_mean", "y_mean")],
+                           proj4string = CRS("+init=epsg:4326")), 
+                         CRS("+init=epsg:3301"))
+    clusters <- dbscan(stops@coords, eps = simplify_stops, minPts = 1)
+    cluster_points <- aggregate(data.frame(stops@coords), 
+                                by = list(clusters$cluster),
+                                FUN = function(x) apply(as.matrix(x), 
+                                                        MARGIN = 2, 
+                                                        FUN = mean))
+    seg2[seg2$stop, c("x_mean", "y_mean")] <- 
+      as.matrix(cluster_points[clusters$cluster, c("x_mean", "y_mean")])
+  }
   return(seg2)
 }
 
-
+# m <- leaflet() %>% addTiles() %>% 
+#   addCircleMarkers(data = spTransform(stops, CRS("+init=epsg:4326")))
+# m2 <- addCircleMarkers(m, data = spTransform(stops, 
+#                                           CRS("+init=epsg:4326")), 
+#                        color = "red")
 
 
 
