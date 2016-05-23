@@ -47,8 +47,8 @@ for(user_ in users){
   # --- Segmentation
   daten_segmentiert <- naive_segmentation(daten, 
                                           dt = 5, 
-                                          dsp = 100, 
-                                          dt_break = 180, 
+                                          dsp = 60, 
+                                          dt_break = 3, 
                                           dt_short = 100, 
                                           ds_short = 100)
   

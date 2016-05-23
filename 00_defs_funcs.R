@@ -295,17 +295,21 @@ naive_segmentation <- function(df, dt, dsp, dt_break, dt_short, ds_short){
     }
   }
   
-  # remove short movement segments
+  # remove short movement segments if they are surrounded by stops that
+  #   are close together
+  temp <- unique(df[, c("segment", "stop")])
+  sandwich <- !temp$stop & c(F, temp$stop[-nrow(temp)]) & c(temp$stop[-1], F)
+  names(sandwich) <- temp$segment
   df <- ddply(df, "segment", .fun = function(df){
     n <- nrow(df)
     if(difftime(df[n, "t"], df[1, "t"], units = "secs") < dt_short & 
-       distHaversine(df[1, c("x", "y")], df[1, c("x", "y")]) < ds_short & 
-       df[1, "stop"] == F){
+       distHaversine(df[1, c("x", "y")], df[nrow(df), c("x", "y")]) < ds_short & 
+       sandwich[as.character(df[1, "segment"])]){
       df[, "stop"] <- T
     }
     return(df)
   })
-  df$segment = c(0, cumsum(abs(diff(df$stop))))
+  df$segment = c(0, cumsum(abs(diff(df$segment))))
   
   return(df)
 }
@@ -363,26 +367,93 @@ naive_simplification <- function(df, ds, simplify_stops = 0){
                                 FUN = function(x) apply(as.matrix(x), 
                                                         MARGIN = 2, 
                                                         FUN = mean))
+    cluster_points[, c("x_mean", "y_mean")] <- 
+      (SpatialPoints(cluster_points[, c("x_mean", "y_mean")],
+                    CRS("+init=epsg:3301")) %>% 
+      spTransform(CRS("+init=epsg:4326")))@coords
+    
     seg2[seg2$stop, c("x_mean", "y_mean")] <- 
       as.matrix(cluster_points[clusters$cluster, c("x_mean", "y_mean")])
   }
   return(seg2)
 }
 
+
+# 
+# 
+# 243
+# 
 # m <- leaflet() %>% addTiles() %>% 
+#   addCircleMarkers(data = spTransform(stops[243:243, ], 
+#                                       CRS("+init=epsg:4326")))
+# m3 <- addCircleMarkers(m, data = SpatialPoints(seg2[seg2$stop, 
+#                                                     c("x_mean", "y_mean")], 
+#                                                CRS("+init=epsg:4326")), 
+#                        col = "red")
+# temp <- subset(daten_segmentiert, t >= "2015-09-16" & t < "2015-09-17")
+# cols <- rainbow(9)
+# allpoints <- SpatialPoints(temp[temp$segment %in% c(483,484), c("x", "y")], CRS("+init=epsg:4326"))
+# m4 <- addCircleMarkers(m3, data = allpoints, 
+#                        color = c(rep("green", 4), rep("blue", 4), rep("orange", 3)))
+# 
+# 
+# dists <- seg2[seg2$stop, c("x_mean", "y_mean")] - rep(c(26.70986, 58.3809), each = sum(seg2$stop))
+# 
+# m2
+# 
+# m <- leaflet() %>% addTiles() %>%
 #   addCircleMarkers(data = spTransform(stops, CRS("+init=epsg:4326")))
-# m2 <- addCircleMarkers(m, data = spTransform(stops, 
-#                                           CRS("+init=epsg:4326")), 
+# m2 <- addCircleMarkers(m, data = spTransform(stops,
+#                                           CRS("+init=epsg:4326")),
 #                        color = "red")
+# # 
+# # 
+# # for(i_ in 1:(nrow(df)-1)){
+# #   if(as.numeric(abs(difftime(df$t[i_], 
+# #                              df$t[i_ + 1], units = "mins"))) > dt_break & 
+# #      df$segment[i_] == df$segment[i_ + 1]){
+# #     df$segment[(i_ + 1):nrow(df)] <- df$segment[(i_+1):nrow(df)] + 1
+# #   }
+# # }
+# # df <- int
+# # 
+# int <- subset(seg2, gps_id %in% 5305979:5305990)
+# int <- subset(daten_segmentiert, gps_id %in% 5305979:5305990)
+# int <- subset(df, gps_id %in% 5305979:5305990)
+# int
+# 
+# myp <- SpatialPoints(df[df$gps_id %in% 5305985:5305989, c("x", "y")],
+#                      CRS("+init=epsg:4326"))
+# m5 <- addCircleMarkers(m, data = myp, color = c("red", rep("orange", 3),
+#                                                 "green"), opacity = 1)
+# 
+temp <- segmente[segmente$stop, ]
+leaflet() %>% addTiles() %>%
+  addCircleMarkers(data = SpatialPoints(temp[, c("x_mean", "y_mean")],
+                                 CRS("+init=epsg:4326")),
+                   popup = as.character(temp$gps_id))
 
+case <- 5266232
+plusminus <- 3
+daten[abs(daten$gps_id - case) < plusminus, ]
+daten_segmentiert[abs(daten_segmentiert$gps_id - case) < plusminus, ]
+df[abs(df$gps_id - case) < plusminus, ]
 
+leaflet() %>% addTiles() %>%
+  addCircleMarkers(data = SpatialPoints(daten[abs(daten$gps_id - case) < plusminus,
+                                              c("x", "y")],
+                                        CRS("+init=epsg:4326")),
+                   color = c("red", "blue")[1+daten_segmentiert[
+                     abs(daten_segmentiert$gps_id - case) < plusminus, c("stop")]])
 
-
-
-
-
-
-
-
-
-
+leaflet() %>% addTiles() %>%
+  addCircleMarkers(data = SpatialPoints(daten[abs(daten$gps_id - case) < plusminus,
+                                              c("x", "y")],
+                                        CRS("+init=epsg:4326")),
+                   color = c(rep("blue", 4), rep("purple", 9), rep("orange", 3),
+                             rep("red", 3)),
+                   popup = as.character(daten[abs(daten$gps_id - case) < plusminus,
+                                              "gps_id"]),
+                   options = popupOptions(minWidth = 20,
+                                          closeOnClick = T,
+                                          closeButton = T)) 
