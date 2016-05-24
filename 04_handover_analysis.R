@@ -29,10 +29,10 @@ create or replace view gps_enriched as
 select a.gps_id, a.uid, a.t, a.accuracy, a.geom as geom_gps, x.state, x.operator_short, x.t_state,
 y.t_connect, y.geom_connected, y.net_connected, y.radio as radio_connected
 from gps a left join lateral (
-  select b.state, b.operator_short, b.t as t_state
-  from device_cell_service b
-  where a.uid = b.uid and a.t > b.t
-  order by b.t desc
+  select state, operator_short, t as t_state
+  from device_cell_service
+  where a.uid = uid and a.t > t
+  order by t desc
   limit 1
 ) x
 on true
@@ -54,19 +54,19 @@ on true
 dbGetQuery(con, q)
 
 # --- Closest mast info --------------------------------------------------------
-# Achtung, dauert lange!
-q <- "
-DROP TABLE IF EXISTS closest_masts CASCADE;
-create table closest_masts as
-select a.gps_id, a.net_connected, a.radio_connected, b.net as net_mast, b.radio, 
-  b.geom as geom_mast, ST_Distance(ST_Transform(a.geom_gps, 3301), 
-                                   ST_Transform(b.geom, 3301)) as dist
-from
-gps_enriched a left join masts b
-ON ST_Contains(ST_Transform(b.geom_voronoi, 3301), 
-               ST_Transform(a.geom_gps, 3301)) and 
-  b.mcc = 248
-;
-"
-dbGetQuery(con, q)
+# Achtung, dauert lange! Zu lange! abgeschossen.
+# q <- "
+# DROP TABLE IF EXISTS closest_masts CASCADE;
+# create table closest_masts as
+# select a.gps_id, a.net_connected, a.radio_connected, b.net as net_mast, b.radio, 
+#   b.geom as geom_mast, ST_Distance(ST_Transform(a.geom_gps, 3301), 
+#                                    ST_Transform(b.geom, 3301)) as dist
+# from
+# gps_enriched a left join masts b
+# ON ST_Contains(ST_Transform(b.geom_voronoi, 3301), 
+#                ST_Transform(a.geom_gps, 3301)) and 
+#   b.mcc = 248
+# ;
+# "
+# dbGetQuery(con, q)
 

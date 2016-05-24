@@ -283,6 +283,31 @@ naive_segmentation <- function(df, dt, dsp, dt_break, dt_short, ds_short){
   diff_t[!diff_sp]  <- 0
   df$stop <- apply(diff_t, 1, FUN = function(v) max(v) - min(v) >= (dt * 60))  
   
+  
+  # remove short movement segments if they are surrounded by stops that
+  #   are close together in space and time
+  df$segment = c(0, cumsum(abs(diff(df$stop))))
+  temp <- ddply(df, .variables = c("segment", "stop"), .fun = function(df_){
+    df_ <- df_[order(df_$t), ]
+    n <- nrow(df_)
+    return(data.frame(segment = df_[1, "segment"],
+                      stop = df_[1, "stop"],
+                      t_beg = df_[1, "t"],
+                      x_beg = df_[1, "x"],
+                      y_beg = df_[1, "y"],
+                      t_end = df_[n, "t"],
+                      x_end = df_[n, "x"],
+                      y_end = df_[n, "y"],
+                      gps_id = df_[1, "gps_id"]))
+  })
+  sandwich <- !temp$stop & c(F, temp$stop[-nrow(temp)]) & c(temp$stop[-1], F) &
+    difftime(c(temp$t_beg[-1], temp$t_beg[nrow(temp)]),
+             c(temp$t_end[1], temp$t_end[-nrow(temp)]), 
+             units = "secs") < dt_short & 
+    distHaversine(temp[c(2:nrow(temp), nrow(temp)), c("x_beg", "y_beg")], 
+                  temp[c(1, 1:(nrow(temp) - 1)), c("x_end", "y_end")]) < ds_short
+  df[df$segment %in% temp[sandwich, "segment"], "stop"] <- T
+  
   # Zuteilung der Segmente
   df$segment = c(0, cumsum(abs(diff(df$stop))))
   
@@ -295,21 +320,7 @@ naive_segmentation <- function(df, dt, dsp, dt_break, dt_short, ds_short){
     }
   }
   
-  # remove short movement segments if they are surrounded by stops that
-  #   are close together
-  temp <- unique(df[, c("segment", "stop")])
-  sandwich <- !temp$stop & c(F, temp$stop[-nrow(temp)]) & c(temp$stop[-1], F)
-  names(sandwich) <- temp$segment
-  df <- ddply(df, "segment", .fun = function(df){
-    n <- nrow(df)
-    if(difftime(df[n, "t"], df[1, "t"], units = "secs") < dt_short & 
-       distHaversine(df[1, c("x", "y")], df[nrow(df), c("x", "y")]) < ds_short & 
-       sandwich[as.character(df[1, "segment"])]){
-      df[, "stop"] <- T
-    }
-    return(df)
-  })
-  df$segment = c(0, cumsum(abs(diff(df$segment))))
+  # df$segment = c(0, cumsum(abs(diff(df$segment))))
   
   return(df)
 }
@@ -317,7 +328,7 @@ naive_segmentation <- function(df, dt, dsp, dt_break, dt_short, ds_short){
 # --- Simplification -----------------------------------------------------------
 # Gets simple summary statistics for each segment
 # Sticks together adjacent stop segments that are "too close"
-naive_simplification <- function(df, ds, simplify_stops = 0){
+naive_simplification <- function(df, ds, simplify_stops = 0, n = 1){
   df <- df[order(df$t), ]
   segments <- ddply(df, "segment", function(df_){
     return(data.frame(gps_id = df_[1, "gps_id"],
@@ -331,9 +342,13 @@ naive_simplification <- function(df, ds, simplify_stops = 0){
                       y_start = df_[1, "y"],
                       y_end = df_[nrow(df_), "y"]))
   })
+  
+  # --- Clean up segments
   seg2 <- segments
   j_ <- 1
   for(i_ in 2:nrow(segments)){
+    # If a stop follows a stop and they are close, put them together
+    #   Exponential weighting to make matches more probable
     if(seg2[j_, "stop"] == T & segments[i_, "stop"] == T & 
        distHaversine(seg2[j_, c("x_mean", "y_mean")], 
                      segments[i_, c("x_mean", "y_mean")]) < ds){
@@ -344,24 +359,30 @@ naive_simplification <- function(df, ds, simplify_stops = 0){
       seg2[j_, "x_end"] <- n_$x_end
       seg2[j_, "y_end"] <- n_$y_end
     }else{
+      # A stop followed by a move lasts until the beginning of the move
       if(seg2[j_, "stop"] == T & segments[i_, "stop"] == F & 
          distHaversine(seg2[j_, c("x_mean", "y_mean")], 
                        segments[i_, c("x_start", "y_start")]) < ds){
         seg2[j_, "tmax"] <- segments[i_, "tmin"]
       }
+      # Also, if there is nothing to put together, the currently active
+      #   segment is changed
       j_ <- j_ + 1
       seg2[j_, ] <- segments[i_, ]
     }
   }
   seg2 <- seg2[1:j_, ]
+  
+  # --- Identify close stops
   if(simplify_stops > 0){
+    # print("Clustering Stop points")
     library(dbscan)
     library(plyr)
     stops <- spTransform(SpatialPoints(subset(seg2, 
                                               stop)[, c("x_mean", "y_mean")],
                            proj4string = CRS("+init=epsg:4326")), 
                          CRS("+init=epsg:3301"))
-    clusters <- dbscan(stops@coords, eps = simplify_stops, minPts = 1)
+    clusters <- dbscan(stops@coords, eps = simplify_stops, minPts = n)
     cluster_points <- aggregate(data.frame(stops@coords), 
                                 by = list(clusters$cluster),
                                 FUN = function(x) apply(as.matrix(x), 
@@ -372,8 +393,10 @@ naive_simplification <- function(df, ds, simplify_stops = 0){
                     CRS("+init=epsg:3301")) %>% 
       spTransform(CRS("+init=epsg:4326")))@coords
     
-    seg2[seg2$stop, c("x_mean", "y_mean")] <- 
-      as.matrix(cluster_points[clusters$cluster, c("x_mean", "y_mean")])
+    seg2[which(seg2$stop)[clusters$cluster > 0], 
+         c("x_mean", "y_mean")] <- 
+      as.matrix(cluster_points[(clusters$cluster + 1)[clusters$cluster > 0], 
+                               c("x_mean", "y_mean")])
   }
   return(seg2)
 }
@@ -427,33 +450,3 @@ naive_simplification <- function(df, ds, simplify_stops = 0){
 # m5 <- addCircleMarkers(m, data = myp, color = c("red", rep("orange", 3),
 #                                                 "green"), opacity = 1)
 # 
-temp <- segmente[segmente$stop, ]
-leaflet() %>% addTiles() %>%
-  addCircleMarkers(data = SpatialPoints(temp[, c("x_mean", "y_mean")],
-                                 CRS("+init=epsg:4326")),
-                   popup = as.character(temp$gps_id))
-
-case <- 5266232
-plusminus <- 3
-daten[abs(daten$gps_id - case) < plusminus, ]
-daten_segmentiert[abs(daten_segmentiert$gps_id - case) < plusminus, ]
-df[abs(df$gps_id - case) < plusminus, ]
-
-leaflet() %>% addTiles() %>%
-  addCircleMarkers(data = SpatialPoints(daten[abs(daten$gps_id - case) < plusminus,
-                                              c("x", "y")],
-                                        CRS("+init=epsg:4326")),
-                   color = c("red", "blue")[1+daten_segmentiert[
-                     abs(daten_segmentiert$gps_id - case) < plusminus, c("stop")]])
-
-leaflet() %>% addTiles() %>%
-  addCircleMarkers(data = SpatialPoints(daten[abs(daten$gps_id - case) < plusminus,
-                                              c("x", "y")],
-                                        CRS("+init=epsg:4326")),
-                   color = c(rep("blue", 4), rep("purple", 9), rep("orange", 3),
-                             rep("red", 3)),
-                   popup = as.character(daten[abs(daten$gps_id - case) < plusminus,
-                                              "gps_id"]),
-                   options = popupOptions(minWidth = 20,
-                                          closeOnClick = T,
-                                          closeButton = T)) 

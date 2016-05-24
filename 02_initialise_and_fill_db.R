@@ -296,7 +296,56 @@ where ST_contains(ST_Transform(b.geom, 3301),
 "
 t <- dbGetQuery(con, q)
 
+# --- Add summary statistics to the masts --------------------------------------
+# Statistics to be added:
+# 1. Avg + max distance to neighbours within the same operator and radio
+# An alternative would be to allow for "higher" radio neighbours, but the limit
+#   Depends on the cellphone, hence implementing it would be impractical
+# 2. Avg. Area of the neighboring cells (including the cell itself)
+q <- "
+ALTER TABLE MASTS ADD COLUMN neighbour_avg_dist NUMERIC;
+ALTER TABLE MASTS ADD COLUMN neighbour_max_dist NUMERIC;
+ALTER TABLE MASTS ADD COLUMN neighbour_area NUMERIC;
 
+UPDATE MASTS m1
+  SET 
+    avg_dist = avg(ST_DISTANCE(m1.geom, m2.geom))
+  FROM 
+    masts m2
+  WHERE 
+    ST_TOUCHES(m1.geom_voronoi m2.geom_voronoi) and 
+    m1.masts_id != m2.masts_id and
+    m1.radio = m2.radio and
+    m1.net = m2.net;
+
+UPDATE MASTS m1
+  SET 
+    max_dist = max(ST_DISTANCE(m1.geom, m2.geom))
+  FROM 
+    masts m2
+  WHERE 
+    ST_TOUCHES(m1.geom_voronoi m2.geom_voronoi) and 
+    m1.masts_id != m2.masts_id and
+    m1.radio = m2.radio and
+    m1.net = m2.net;
+
+UPDATE MASTS m1
+  SET 
+    neighbour_area = avg(ST_AREA(m2.geom_voronoi))
+  FROM 
+    masts m2
+  WHERE 
+    ST_TOUCHES(m1.geom_voronoi m2.geom_voronoi) and
+    m1.radio = m2.radio and
+    m1.net = m2.net;
+"
+dbGetQuery(con,q)
+
+# --- Add the mast_id to the connection table
+q <- "
+ALTER TABLE device_cell_location ADD COLUMN masts_id BIGINT FOREIGN KEY REFERECES masts(masts_id);
+UPDATE device_cell_location SET masts_id ... continue here
+"
 
 
 
