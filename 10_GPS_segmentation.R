@@ -17,20 +17,21 @@ connect(user = "burkhard",
 # ------------------------------------------------------------------------------
 # --- 2. Set up Segments table
 # ------------------------------------------------------------------------------
-dbGetQuery(con, "
-          DROP TABLE IF EXISTS segments;
-          CREATE TABLE segments(
-          uid integer,
-          segment integer,
-          gps_id bigint,
-          tmin timestamp with time zone,
-          tmax timestamp with time zone,
-          stop boolean,
-          pos_start geometry(point),
-          pos_mean geometry(point),
-          pos_end geometry(point)
-          )
-          ")
+# dbGetQuery(con, "
+#           DROP TABLE IF EXISTS segments;
+#           CREATE TABLE segments(
+#           uid integer,
+#           segment integer,
+#           gps_id bigint,
+#           gps_id_end bigint,
+#           tmin timestamp with time zone,
+#           tmax timestamp with time zone,
+#           stop boolean,
+#           pos_start geometry(point),
+#           pos_mean geometry(point),
+#           pos_end geometry(point)
+#           )
+#           ")
 
 # ------------------------------------------------------------------------------
 # --- 3. Segmentation + Simplification
@@ -120,7 +121,7 @@ for(user_ in users){
   q <- "
   INSERT INTO segments
   SELECT 
-    uid::integer, segment::integer, gps_id::bigint, 
+    uid::integer, segment::integer, gps_id::bigint, gps_id_end::bigint,
     TO_Timestamp(tmin) as tmin, 
     TO_Timestamp(tmax) as tmax, 
     stop::boolean, 

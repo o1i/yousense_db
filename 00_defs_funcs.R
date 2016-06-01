@@ -332,6 +332,7 @@ naive_simplification <- function(df, ds, simplify_stops = 0, n = 1){
   df <- df[order(df$t), ]
   segments <- ddply(df, "segment", function(df_){
     return(data.frame(gps_id = df_[1, "gps_id"],
+                      gps_id_end = df_[nrow(df_), "gps_id"],
                       tmin = df_[1, "t"],
                       tmax = df_[nrow(df_), "t"],
                       stop = df_[1, "stop"],
@@ -450,3 +451,38 @@ naive_simplification <- function(df, ds, simplify_stops = 0, n = 1){
 # m5 <- addCircleMarkers(m, data = myp, color = c("red", rep("orange", 3),
 #                                                 "green"), opacity = 1)
 # 
+
+# ------------------------------------------------------------------------------
+# --- Re-usable functions ------------------------------------------------------
+# ------------------------------------------------------------------------------
+
+make_spatial_lines <- function(mat, crs = CRS("+init=epsg:4326")){
+  # assumes that mat has two columns with the x and y coordinates
+  SpatialLinesDataFrame(                      # Aim: Spatial Dataframe
+    SpatialLines(                             # SpatialLines for the geometry
+      list(                                   # SpatialLines is a list of Lines
+        #   plus a CRS
+        Lines(                                # A Multiline (LineS) is a list of 
+          #   lines (Line)
+          list(
+            Line(mat)),             # Actual Line
+          ID = "1")), 
+      proj4string = crs),  # Only the SpatialLines has a CRS
+    data = mat                      # nrow(data)==length(SpatialLines)
+  )
+}
+
+make_spatial_segments <- function(mat, crs = CRS("+init=epsg:4326")){
+  # assumes that m has 4 columns. x1, y1, x2, y2.
+  mat <- as.matrix(mat)
+  rownames(mat) <- 1:nrow(mat)
+  SpatialLinesDataFrame(                     
+    SpatialLines(                            
+      unname(sapply(rownames(mat), FUN = function(n){
+        Lines(list(Line(matrix(mat[n, ], ncol = 2, byrow = T))), ID = n)
+      }))
+      , 
+      proj4string = crs), 
+    data = data.frame(mat)                      
+  )
+}
