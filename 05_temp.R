@@ -18,11 +18,12 @@ connect(user = "burkhard",
 
 # --- Create the gps_gsm table
 q <- "
-CREATE TABLE gps_gsm as 
+EXPLAIN ANALYZE CREATE TABLE gps_gsm as 
 SELECT a.uid, a.gps_id, b.id_dcl, c.masts_id, a.state, a.geom as geom_gps, 
   greatest(a.t_start, b.t) as t_start, 
 	LEAST(a.t_end, b.t_next) as t_end, b.net, c.geom as geom_mast,
-  c.neighbour_avg_dist, c.neighbour_max_dist, c.neighbour_area, c.radio_level,
+  c.neighbour_avg_dist, c.neighbour_max_dist, c.neighbour_area, c.samples,
+  c.radio_level,
   ST_DISTANCE(ST_TRANSFORM(a.geom, 3301), ST_TRANSFORM(c.geom, 3301)) as dist
 FROM
   gps_state a 
@@ -31,16 +32,21 @@ FROM
     b.t_next is not null and a.t_end is not null
   JOIN masts c
   ON b.masts_id = c.masts_id
+WHERE c.mcc = 248
 ORDER BY 
 uid, t_start, t_end
-;
+;"
+Sys.time()
+system.time(t <- dbGetQuery(con,q))
+t
+# Over night to 2016-06-01: 9259, i.e. 2.6 h
+
+q <- "
 CREATE INDEX gps_gsm_uid ON gps_gsm(uid);
 CREATE INDEX gps_gsm_time ON gps_gsm(t_start, t_end);
 "
-# Over night to 2016-06-01: 9259, i.e. 2.6 h
-
 Sys.time()
-system.time(dbGetQuery(con,q))
+system.time(t <- dbGetQuery(con,q))
 
 Sys.time()
 system.time({
@@ -80,7 +86,7 @@ q <- "
 select id_dcl, gps_id, masts_id, t_start, state, t_end, ST_X(geom_gps) as gps_x, ST_Y(geom_gps) as gps_y, 
   ST_X(geom_mast) as mast_x, ST_Y(geom_mast) as mast_y
 from gps_gsm
-where gps_id < 1000 and t_start <= '2015-04-26 13:00:00' and t_end < '2015-04-26 18:00:00'
+where gps_id < 1000 and t_start <= '2015-04-27 13:00:00' and t_end < '2015-04-27 18:00:00'
 ;"
 system.time(daten <- dbGetQuery(con,q))
 points_gps <- SpatialPointsDataFrame(cbind(daten$gps_x, daten$gps_y), 
@@ -90,10 +96,11 @@ lines_gps <- make_spatial_lines(daten[, c("gps_x", "gps_y")])
 gsm_conn <- make_spatial_segments(daten[, c("gps_x", "gps_y", "mast_x", "mast_y")])
 library(leaflet)
 leaflet() %>% addTiles() %>% 
+  addPolylines(data = lines_gps) %>%
+  addPolylines(data = gsm_conn, color = "purple", opacity = 0.2, weight = 1) %>%
   addCircleMarkers(data = points_gps, 
                    color = c("blue", "red")[1+(daten$state > 0)],
-                   radius = c(7, 15       )[1+(daten$state > 0)]) %>%
-  addPolylines(data = lines_gps) %>%
-  addPolylines(data = gsm_conn, color = "purple", opacity = 0.2, weight = 1)
+                   radius = c(7, 15       )[1+(daten$state > 0)],
+                   popup = as.character(daten$id_dcl))
 
 

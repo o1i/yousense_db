@@ -11,6 +11,9 @@ connect(user = "burkhard",
         host = "localhost", 
         port = 5432)
 
+dbGetQuery(con, "alter database burkhard set work_mem='2GB'");
+dbGetQuery(con, "alter database burkhard set shared_buffers='2GB'");
+
 # --- Define custom function ---------------------------------------------------
 q <- "
 CREATE OR REPLACE FUNCTION to_timestamp(text) RETURNS timestamp with time zone
@@ -38,7 +41,7 @@ res <- sapply(names(col_headers), function(name_){
 
 # --- Fix the GPS table --------------------------------------------------------
 q_gps2 <- "
- DROP TABLE IF EXISTS gps;
+DROP TABLE IF EXISTS gps;
   SELECT
     CAST(uid as integer) as uid,
     t,
@@ -53,36 +56,24 @@ q_gps2 <- "
   FROM sensor_gps
   ORDER BY uid, t
   ;"
-dbGetQuery(con, q_gps2)
+Sys.time()
+system.time(dbGetQuery(con, q_gps2))
+# 2016-06-02: Should take about 40 seconds!
+
 q_gps_id <- "
 ALTER TABLE gps ADD COLUMN gps_ID BIGSERIAL PRIMARY KEY;
 CREATE INDEX gps_sp_index ON gps USING GIST (geom);
-CREATE INDEX time ON gps (t)
-CREATE INDEX gps_idx_uid ON gps (uid);
-"
-dbGetQuery(con, q_gps_id)
-
-# Add the time of the next gps fix to the gps table
-q <- "
-DROP TABLE IF EXISTS temp;
-CREATE TABLE temp AS
-  SELECT gps_id, lead(t, 1) OVER w as t_next
-  FROM gps
-  WINDOW w AS (PARTITION BY uid ORDER BY t)
-;
-CREATE INDEX temp_idx ON temp (gps_id);
-ALTER TABLE gps DROP COLUMN IF EXISTS t_next CASCADE;
 ALTER TABLE gps ADD  COLUMN t_next TIMESTAMP WITH TIME ZONE;
-UPDATE gps g
-SET t_next = a.t_next
-FROM temp a
-WHERE g.gps_id = a.gps_id;
-DROP TABLE temp;
-DROP INDEX time;
-CREATE INDEX gps_idx_time ON gps(t, t_next);
+UPDATE gps as a
+  SET t_next = b.t_next
+  FROM (SELECT gps_id, lead(t, 1) OVER (PARTITION BY uid ORDER BY t) as t_next
+        FROM gps) b
+  WHERE a. gps_id = b.gps_id;
+CREATE INDEX gps_time ON gps (t, t_next);
 CREATE INDEX gps_uid_t_tnext ON gps(uid, t, t_next);
 "
-dbGetQuery(con,q)
+system.time(dbGetQuery(con, q_gps_id))
+# 2016-06-02: 400 sekunden. (passage ab update...)
 
 # --- Device cell location -----------------------------------------------------
 
@@ -119,6 +110,7 @@ CREATE INDEX device_cell_location_idx_mast_connection ON device_cell_location
 CREATE INDEX device_cell_location_time ON device_cell_location (t, t_next);
 CREATE INDEX device_cell_location_uid_t_tnext ON 
   device_cell_location (uid, t, t_next);
+CREATE INDEX device_cell_location_masts_id ON device_cell_location(masts_id);
 "
 systemdbGetQuery(con, q)
 
@@ -448,12 +440,13 @@ ALTER TABLE gps_state ADD CONSTRAINT gps_state_fk FOREIGN KEY (gps_id)
   REFERENCES gps(gps_id) ON DELETE CASCADE ON UPDATE CASCADE;
 CREATE INDEX gps_state_idx_gps_id ON gps_state(gps_id);
 CREATE INDEX gps_state_uid ON gps_state(uid);
-CREATE INDEX gps_state_time ON gps_state(t, t_next);
+CREATE INDEX gps_state_time ON gps_state(t_start, t_end);
 CREATE INDEX gps_state_uid_time ON gps_state (uid, t_start, t_end);
 "
-system.time(dbGetQuery(con,q))
+Sys.time(); system.time(dbGetQuery(con,q))
 # 2016-05-31: elapsed = 1010
 # 2016-05-31: elapsed = 980
+# 2016-06-02: 971 (bis alter table gps_state) +  37 (rest)
 
 # --- User-Präferenzen ---------------------------------------------------------
 # Starts the table with user preferences. Here the proportion of connections
