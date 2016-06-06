@@ -18,6 +18,7 @@ connect(user = "burkhard",
 
 # --- Create the gps_gsm table
 q <- "
+DROP TABLE IF EXISTS gps_gsm;
 EXPLAIN ANALYZE CREATE TABLE gps_gsm as 
 SELECT a.uid, a.gps_id, b.id_dcl, c.masts_id, a.state, a.geom as geom_gps, 
   greatest(a.t_start, b.t) as t_start, 
@@ -33,13 +34,12 @@ FROM
   JOIN masts c
   ON b.masts_id = c.masts_id
 WHERE c.mcc = 248
-ORDER BY 
-uid, t_start, t_end
 ;"
 Sys.time()
 system.time(t <- dbGetQuery(con,q))
 t
 # Over night to 2016-06-01: 9259, i.e. 2.6 h
+# 2016-06-03 after some optimisation: 7850, i.e. 2.1h
 
 q <- "
 CREATE INDEX gps_gsm_uid ON gps_gsm(uid);

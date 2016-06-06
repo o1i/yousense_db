@@ -108,8 +108,11 @@ UPDATE device_cell_location as a
 CREATE INDEX device_cell_location_idx_mast_connection ON device_cell_location 
 (mcc, net, area, cell);
 CREATE INDEX device_cell_location_time ON device_cell_location (t, t_next);
+CREATE INDEX dcl_t_next ON device_cell_location(t_next);
 CREATE INDEX device_cell_location_uid_t_tnext ON 
   device_cell_location (uid, t, t_next);
+ALTER TABLE device_cell_location ADD CONSTRAINT dcl_masts_id_fk FOREIGN KEY 
+  (masts_id) REFERENCES masts(masts_id);
 CREATE INDEX device_cell_location_masts_id ON device_cell_location(masts_id);
 "
 systemdbGetQuery(con, q)
@@ -117,25 +120,48 @@ systemdbGetQuery(con, q)
 
 # --- Create CDR summary table -------------------------------------------------
 q <- "
-CREATE OR REPLACE VIEW all_cdr as
-SELECT uid,  t, eventtype
-FROM call_incoming_answered
-UNION ALL
-SELECT uid,  t, eventtype
-FROM call_incoming_missed
-UNION ALL
-SELECT uid,  t, eventtype
-FROM call_outgoing
-UNION ALL
-SELECT uid,  t, eventtype
-FROM sms_incoming
-UNION ALL
-SELECT uid,  t, eventtype
-FROM sms_outgoing
+DROP TABLE IF EXISTS all_cdr CASCADE;
+CREATE TABLE all_cdr as
+SELECT a.*, b.masts_id, b.net from (
+  SELECT uid,  to_timestamp(time_start) as t_start, 
+    to_timestamp(time_end) as t_end,
+    age(to_timestamp(time_end), to_timestamp(time_start)) as duration, eventtype
+  FROM call_incoming_answered
+  UNION ALL
+  SELECT uid,  t as t_start, NULL as t_end, NULL as duration, eventtype
+  FROM call_incoming_missed
+  UNION ALL
+  SELECT uid,  to_timestamp(time_start) as t_start, 
+    to_timestamp(time_end) as t_end,
+    age(to_timestamp(time_end), to_timestamp(time_start)) as duration, eventtype
+  FROM call_outgoing
+  UNION ALL
+  SELECT uid,  t as t_start, NULL as t_end, NULL as duration, eventtype
+  FROM sms_incoming
+  UNION ALL
+  SELECT uid,  t as t_start, NULL as t_end, NULL as duration, eventtype
+  FROM sms_outgoing ) a join device_cell_location b
+ON a.uid = b.uid and a.t_start >= b.t and (a.t_start < b.t_next)
+;
+ALTER TABLE all_cdr ADD COLUMN id_all_cdr BIGSERIAL PRIMARY KEY;
+ALTER TABLE all_cdr ADD COLUMN proxy_mast BOOLEAN;
+"
+t <- dbGetQuery(con, q)
+q <- "
+EXPLAIN (ANALYZE, BUFFERS, VERBOSE) UPDATE ALL_CDR as a
+SET masts_id = e.masts_id, proxy_mast = true
+FROM 
+ (SELECT b.id_all_cdr, d.masts_id
+  FROM all_cdr b 
+    JOIN gps c ON b.uid = c.uid AND 
+      b.t_start BETWEEN c.t AND c.t_next
+    JOIN masts d ON d.mcc = 248 AND 
+      ST_WITHIN(c.geom, d.geom_voronoi) AND
+      d.net = b.net
+	WHERE b.masts_id IS NULL) e
+WHERE a.masts_id IS NULL and a.id_all_cdr = e.id_all_cdr
 ;"
 t <- dbGetQuery(con, q)
-
-try(disconnect(), silent = T)
 
 # ------------------------------------------------------------------------------
 # --- Cell tower info ----------------------------------------------------------
@@ -188,6 +214,7 @@ ALTER TABLE masts ADD COLUMN geom_voronoi geometry('POLYGON');
 UPDATE masts SET radio = trim(both from radio);
 CREATE INDEX masts_idx_geom_voronoi ON masts USING GIST (geom_voronoi);
 CREATE INDEX masts_idx_mast_connection ON masts (mcc, net, area, cell);
+CREATE INDEX masts_id_partial ON masts(masts_id) WHERE mcc = 248;
 "
 dbGetQuery(con, q)
 
@@ -430,7 +457,7 @@ CREATE INDEX temp_idx_tnext ON temp (t_next);
 CREATE INDEX temp_idx_test ON temp(uid, t, t_next);
 
 CREATE TABLE gps_state as 
-SELECT a.uid, a.gps_id, a.geom, greatest(a.t, b.t) as t_start, least(a.t_next, b.t_next) as t_end, 
+SELECT a.uid::numeric, a.gps_id, a.geom, greatest(a.t, b.t) as t_start, least(a.t_next, b.t_next) as t_end, 
   b.state 
 FROM gps a left join 
   temp b
@@ -442,6 +469,7 @@ CREATE INDEX gps_state_idx_gps_id ON gps_state(gps_id);
 CREATE INDEX gps_state_uid ON gps_state(uid);
 CREATE INDEX gps_state_time ON gps_state(t_start, t_end);
 CREATE INDEX gps_state_uid_time ON gps_state (uid, t_start, t_end);
+CREATE INDEX gps_state_uid_t_end ON gps_state (t_end);
 "
 Sys.time(); system.time(dbGetQuery(con,q))
 # 2016-05-31: elapsed = 1010

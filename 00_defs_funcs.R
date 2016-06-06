@@ -281,6 +281,7 @@ naive_segmentation <- function(df, dt, dsp, dt_break, dt_short, ds_short){
   #   max(apply(diff_sp[, 1:(dt + 1)], 1, 
   #             function(v) sum(abs(diff(v))))) == 1
   diff_t[!diff_sp]  <- 0
+  
   df$stop <- apply(diff_t, 1, FUN = function(v) max(v) - min(v) >= (dt * 60))  
   
   
@@ -300,6 +301,7 @@ naive_segmentation <- function(df, dt, dsp, dt_break, dt_short, ds_short){
                       y_end = df_[n, "y"],
                       gps_id = df_[1, "gps_id"]))
   })
+  
   sandwich <- !temp$stop & c(F, temp$stop[-nrow(temp)]) & c(temp$stop[-1], F) &
     difftime(c(temp$t_beg[-1], temp$t_beg[nrow(temp)]),
              c(temp$t_end[1], temp$t_end[-nrow(temp)]), 

@@ -13,13 +13,11 @@ connect(user = "burkhard",
 # --- Actual stuff -------------------------------------------------------------
 
 # --- Parameters
-nummer <- 284
-unten <- "2015-06-19"
-oben <- "2015-06-20"
+nummer <- 174
 
 # --- GPS Data -----------------------------------------------------------------
 q <- paste0("
-SELECT t, ST_X(geom) as x, ST_Y(geom) as y FROM gps
+SELECT t, ST_X(geom) as x, ST_Y(geom) as y, gps_id FROM gps
 WHERE uid = ", nummer, ";")
 daten <- dbGetQuery(con, q)
 
@@ -32,17 +30,11 @@ daten_segmentiert <- naive_segmentation(daten,
                                         ds_short = 100)
 segmente <- naive_simplification(daten_segmentiert, 100)
 
-verwendet_gps <- subset(daten_segmentiert, t >= unten & t < oben)
-verwendet_segmente_gps <- subset(segmente, tmin < oben & tmax > unten)
-traj_gps <- SpatialLines(list(Lines(list(Line(verwendet_gps[, c("x", "y")])), 
-                                    ID = "1")),
-                         proj4string = CRS("+init=epsg:4326"))
-points_gps <- SpatialPointsDataFrame(verwendet_gps[, c("x", "y")],
-                                     data = verwendet_gps,
-                                     proj4string = CRS("+init=epsg:4326"))
+
 
 
 # --- GSM Part -----------------------------------------------------------------
+library(rgeos)
 q <- paste0("
 select a.uid, t, a.cell, a.area, ST_AsText(b.geom_voronoi) as geom,
   ST_AsText(b.geom) as geom_point
@@ -67,7 +59,7 @@ polys_gsm <- do.call(rbind,sapply(ids,
   SpatialPolygonsDataFrame(data = daten_gsm[, !colnames(daten_gsm) %in% "geom"],
                            match.ID = F)
 
-verwendet_gsm <- polys_gsm[daten_gsm$t >= unten & daten_gsm$t < oben, ]
+
 
 
 # --- CDR Part -----------------------------------------------------------------
@@ -75,11 +67,12 @@ get_last_masts <- function(tn_, uid_, timevar_){
   q <- paste0("
 select d.*, ST_AsText(e.geom) as point, ST_AsText(e.geom_voronoi) as polygon, '",
               tn_, "' as type from
-(select a.uid, a.t, b.cell, b.area, b.mcc, b.net, b.time_connect
+(select a.uid, a.t, b.cell, b.area, b.mcc, b.net, b.time_connect at time zone 'Europe/Tallinn' as time_connect
 from 
   (select uid, ", timevar_, " as t from ", tn_, " where uid = '", uid_, "') a 
 left join lateral (
-  select uid, cell, area, mcc, net, t as time_connect from device_cell_location temp
+  select uid, cell, area, mcc, net, t as time_connect 
+  from device_cell_location temp
   where 
     a.t >= temp.t and
     a.uid = temp.uid
@@ -94,6 +87,8 @@ where d.uid = '", uid_, "' and
 e.geom is not null
 order by t
 ;")
+get_all_masts  
+  
 daten_cdr <- dbGetQuery(con, q)
 }
 sms_in <- get_last_masts("sms_incoming", nummer, "t")
@@ -103,6 +98,26 @@ tel_in_m <- get_last_masts("call_incoming_missed", nummer, "t")
 tel_out <- get_last_masts("call_outgoing", nummer, "t")
 together <- rbind(sms_in, sms_out, tel_in_a, tel_in_m, tel_out)
 
+
+
+# --- Zeitliche Einschränkung --------------------------------------------------
+unten <- "2015-05-13"
+oben <- "2015-05-14"
+
+# --- GPS
+verwendet_gps <- subset(daten_segmentiert, t >= unten & t < oben)
+verwendet_segmente_gps <- subset(segmente, tmin < oben & tmax > unten)
+traj_gps <- SpatialLines(list(Lines(list(Line(verwendet_gps[, c("x", "y")])), 
+                                    ID = "1")),
+                         proj4string = CRS("+init=epsg:4326"))
+points_gps <- SpatialPointsDataFrame(verwendet_gps[, c("x", "y")],
+                                     data = verwendet_gps,
+                                     proj4string = CRS("+init=epsg:4326"))
+
+# --- GSM
+verwendet_gsm <- polys_gsm[daten_gsm$t >= unten & daten_gsm$t < oben, ]
+
+# --- CDR
 verwendet_cdr <- subset(together, t >= unten & t < oben)
 
 getpoints <- function(s){
