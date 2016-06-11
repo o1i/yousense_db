@@ -13,7 +13,7 @@ connect(user = "burkhard",
 # --- Actual stuff -------------------------------------------------------------
 
 # --- Parameters
-nummer <- 174
+nummer <- 172
 
 # --- GPS Data -----------------------------------------------------------------
 q <- paste0("
@@ -101,8 +101,8 @@ together <- rbind(sms_in, sms_out, tel_in_a, tel_in_m, tel_out)
 
 
 # --- Zeitliche Einschränkung --------------------------------------------------
-unten <- "2015-05-13"
-oben <- "2015-05-14"
+unten <- "2015-05-05"
+oben <- "2015-05-06"
 
 # --- GPS
 verwendet_gps <- subset(daten_segmentiert, t >= unten & t < oben)
@@ -140,7 +140,8 @@ leaflet() %>% addTiles() %>% addPolylines(data = traj_gps,
                                       ) > 11) + 
                                       (as.numeric(strftime(verwendet_gps$t,
                                                            format = "%H")
-                                      ) > 13)], group = "GPS")  %>%
+                                      ) > 13)], group = "GPS",
+                   popup = points_gps@data$t)  %>%
   addPolygons(data = verwendet_gsm, group = "GSM") %>%
   addCircleMarkers(data = points_cdr, col = "green", group = "CDR") %>%
   addLayersControl(position = "topleft", 
