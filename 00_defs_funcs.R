@@ -212,8 +212,8 @@ dbWriteSpatial <- function(con, spatial.df, schemaname="public", tablename,
                   ".spatial_id;", sep="")
   query3 <- paste("ALTER TABLE ", schema.table, " DROP COLUMN spatial_id;")
   query4 <- paste("ALTER TABLE ", schema.table, " DROP COLUMN wkt;")
-  query5 <- paste("CREATE INDEX sp_index ON", schema.table, 
-                  "USING GIST (geom);")
+  query5 <- paste0("CREATE INDEX ", tablename, "sp_index ON ", schema.table, 
+                  " USING GIST (geom);")
   er <- dbSendQuery(con, statement=query1)
   er <- dbSendQuery(con, statement=query2)
   er <- dbSendQuery(con, statement=query3)

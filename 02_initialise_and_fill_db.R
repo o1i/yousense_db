@@ -62,26 +62,30 @@ Sys.time()
 system.time(dbGetQuery(con, q_gps2))
 # 2016-06-02: Should take about 40 seconds!
 
-q_gps_id <- "
-ALTER TABLE gps ADD COLUMN gps_ID BIGSERIAL;
+q_id_gps <- "
+ALTER TABLE gps ADD COLUMN id_gps BIGSERIAL;
 ALTER TABLE gps ADD COLUMN t_next TIMESTAMP WITH TIME ZONE;
 ALTER TABLE gps ADD  COLUMN day SMALLINT;
 ALTER TABLE gps ADD  COLUMN day_next SMALLINT;
+ALTER TABLE gps ADD COLUMN geom_next GEOMETRY(POINT);
 UPDATE gps as a
   SET t_next = b.t_next,
     day = EXTRACT(DOY FROM a.t),
-    day_next = b.day_next
-  FROM (SELECT gps_id, lead(t, 1) OVER w as t_next,
-           EXTRACT(DOY FROM lead(t, 1) OVER w) as day_next
+    day_next = b.day_next,
+    geom_next = b.geom_next
+  FROM (SELECT id_gps, lead(t, 1) OVER w as t_next,
+           EXTRACT(DOY FROM lead(t, 1) OVER w) as day_next,
+           lead(geom, 1) OVER w AS geom_next
         FROM gps
         WINDOW w AS (PARTITION BY uid ORDER BY t)
   ) b
-  WHERE a. gps_id = b.gps_id;
-ALTER TABLE gps ADD CONSTRAINT gps_pk PRIMARY KEY (gps_id);
+  WHERE a. id_gps = b.id_gps;
+ALTER TABLE gps ADD CONSTRAINT gps_pk PRIMARY KEY (id_gps);
 CREATE INDEX gps_uid_t_tnext ON gps(uid, day, day_next);
 CREATE INDEX gps_sp_index ON gps USING GIST (geom);
+CREATE INDEX gps_uid_t_t_next ON gps (uid, t, t_next);
 "
-system.time(dbGetQuery(con, q_gps_id))
+system.time(dbGetQuery(con, q_id_gps))
 # 2016-06-02: 400 sekunden. (passage ab update...)
 
 # ------------------------------------------------------------------------------
@@ -229,11 +233,9 @@ GROUP BY uid;
 dbGetQuery(con,q)
 
 # ------------------------------------------------------------------------------
-# --- Gaps ---------------------------------------------------------------------
+# --- Gaps Table ---------------------------------------------------------------
 # ------------------------------------------------------------------------------
 d_heartbeat <- "'13 min'"
-d_gps_t <- "'5 min'"
-d_gps_s <- 500
 
 q <- paste0("
 DROP TABLE IF EXISTS gaps;
@@ -252,31 +254,86 @@ FROM (SELECT uid, t,
       FROM app_heartbeat) b
 WHERE age(b.t_next, b.t) > ", d_heartbeat, ";
 
-/* Fill with GPS gaps */
-INSERT INTO gaps
-SELECT uid, t, t_next, 'gps' AS type
-FROM
-  (SELECT uid, t, t_next, 
-    ST_DISTANCE(ST_TRANSFORM(geom, 3301), 
-                ST_TRANSFORM(lead(geom, 1) OVER 
-                  (PARTITION BY uid ORDER BY t ASC), 3301)) 
-    AS dist
-  FROM gps
-  WHERE age(t_next, t) > ", d_gps_t, ") b
-WHERE dist > ", d_gps_s, "
-
 /* User Preferences Pause */
 INSERT INTO gaps
 SELECT uid, t, LEAST(t_next, t + '1 day'), 'pause' AS type
             FROM (SELECT uid, t, 
               lead(t, 1) OVER (PARTITION BY uid ORDER BY t ASC) AS t_next
-            FROM user_prefs_pause) b
+            FROM user_prefs_pause) b;
 
-/*  */
+/* Index on uid and time */
+CREATE INDEX gaps_uid_time ON gaps (uid, t_start, t_end);
 ")
 dbGetQuery(con,q)
 
+# ------------------------------------------------------------------------------
+# --- Gaps on GPS ------- ------------------------------------------------------
+# ------------------------------------------------------------------------------
+d_gps_t <- "'5 min'"
+d_gps_s <- 500
+# 2: spatial and distance threshold
+# 3: user pause
+# 5: heartbeat
+# 7: ausserhalb estlands
 
+q <- paste0("
+ALTER TABLE gps DROP COLUMN IF EXISTS flag_problem;
+ALTER TABLE gps ADD COLUMN flag_problem INTEGER;
+UPDATE gps SET flag_problem = 1;
+UPDATE gps SET flag_problem = flag_problem * 2
+    WHERE AGE(t_next, t) > ", d_gps_t, " AND 
+    ST_DISTANCE(ST_TRANSFORM(geom, 3301), ST_TRANSFORM(geom_next, 3301)) > ",
+            d_gps_s, ";
+UPDATE gps as a 
+  SET flag_problem = flag_problem * 3
+  FROM (
+    SELECT b.id_gps FROM gps b JOIN gaps c
+    ON b.uid = c.uid and c.type = 'pause' and b.t <= c.t_start and
+      b.t_next >= c.t_end
+  ) d 
+  WHERE a.id_gps = d.id_gps;
+
+UPDATE gps AS a
+  SET flag_problem = flag_problem * 5
+  FROM (
+    SELECT b.id_gps FROM gps b JOIN gaps c
+    ON b.uid = c.uid and c.type = 'heartbeat' and 
+      b.t >= (c.t_start - INTERVAL '60 seconds') and
+      b.t <= (c.t_end - INTERVAL '5 minutes') and
+      age(b.t_next, b.t) > '10 minutes'
+  ) d 
+  WHERE a.id_gps = d.id_gps;
+")
+dbGetQuery(con,q)
+
+library(sp)
+library(rgeos)
+library(magrittr)
+EE <- readRDS("/project-data/userdata/rawdata/EST_adm0.rds")
+mainland <- which.max(sapply(EE@polygons[[1]]@Polygons, 
+                             function(p) nrow(p@coords)))
+EE@polygons[[1]]@Polygons[[mainland]] %>% list %>% Polygons(ID = 1) %>% list %>%
+  SpatialPolygons(proj4string = CRS("+init=epsg:4326")) %>% 
+  spTransform(CRS("+init=epsg:3301")) %>%
+  gSimplify(tol = 3000) %>%  # Simplifies the buffering afterwards
+  gBuffer(width = 10000) %>% 
+  gSimplify(tol = 3000) %>% 
+  spTransform(CRS("+init=epsg:4326"))-> EEm
+# leaflet() %>% addTiles %>% addPolygons(data = EEm)
+dbWriteSpatial(con, EEm, tablename = "geog_shapes")
+
+q <- "
+UPDATE gps as a SET flag_problem = flag_problem * 7
+FROM geog_shapes b
+WHERE NOT ST_CONTAINS(b.geom, a.geom)
+;"
+dbGetQuery(con,q)
+
+
+
+
+
+# ------------------------------------------------------------------------------
 # --- mast info on dcl
 
 
@@ -335,7 +392,5 @@ ALTER TABLE device_cell_location
   REFERENCES masts(id_masts);
 "
 system.time({dbGetQuery(con,q)})
-
-
 
 
