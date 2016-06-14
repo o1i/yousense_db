@@ -16,42 +16,6 @@ connect(user = "burkhard",
         host = "localhost", 
         port = 5432)
 
-# --- Create the gps_gsm table
-q <- "
-DROP TABLE IF EXISTS gps_gsm;
-EXPLAIN (verbose, analyze, buffers) CREATE TABLE gps_gsm as
-SELECT a.uid, a.gps_id, b.id_dcl, c.id_masts, a.geom as geom_gps,
-  GREATEST(a.t, b.t) as t_start,
-	LEAST(a.t_next, b.t_next) as t_end, b.net, c.geom as geom_mast,
-  c.neighbour_avg_dist, c.neighbour_max_dist, c.neighbour_area, c.samples,
-  c.radio_level,
-  ST_DISTANCE(ST_TRANSFORM(a.geom, 3301), ST_TRANSFORM(c.geom, 3301)) as dist
-FROM
-  gps a
-  JOIN device_cell_location b
-  ON a.uid = b.uid and (a.day = b.day or a.day = b.day_next) and 
-    b.t <= a.t_next and b.t_next > a.t and
-    b.t_next is not null and a.t_next is not null
-  JOIN masts c
-  ON b.id_masts = c.id_masts
-WHERE c.mcc = 248
-;"
-Sys.time()
-system.time(t <- dbGetQuery(con,q))
-t
-# Over night to 2016-06-01: 9259, i.e. 2.6 h
-# 2016-06-03 after some optimisation: 7850, i.e. 2.1h
-# 2016-06-10 1h when indexing on days
-
-q <- "
-CREATE INDEX gps_gsm_uid ON gps_gsm(uid);
-CREATE INDEX gps_gsm_time ON gps_gsm(t_start, t_end);
-ALTER TABLE gps_gsm ADD CONSTRAINT gps_gsm_ids PRIMARY KEY (id_masts,
-  gps_id, t_start, t_end);
-"
-Sys.time()
-system.time(t <- dbGetQuery(con,q))
-
 # ------------------------------------------------------------------------------
 # --- Analysis -----------------------------------------------------------------
 # ------------------------------------------------------------------------------
@@ -62,7 +26,7 @@ system.time({
   select gps_id, id_masts, round(neighbour_avg_dist, 1) as neighbour_avg_dist, 
 	round(neighbour_max_dist, 1) as neighbour_max_dist, 
 	round(neighbour_area, 1) as neighbour_area, 
-	radio_level, round(dist::numeric, 1) as distance from gps_gsm;
+	radio_level, round(dist::numeric, 1) as distance from gps_gsm_old;
   ;"
   connections <<- dbGetQuery(con,q)
 })

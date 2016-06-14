@@ -81,7 +81,7 @@ UPDATE gps as a
   ) b
   WHERE a. id_gps = b.id_gps;
 ALTER TABLE gps ADD CONSTRAINT gps_pk PRIMARY KEY (id_gps);
-CREATE INDEX gps_uid_t_tnext ON gps(uid, day, day_next);
+CREATE INDEX gps_uid_day_day_next ON gps(uid, day, day_next);
 CREATE INDEX gps_sp_index ON gps USING GIST (geom);
 CREATE INDEX gps_uid_t_t_next ON gps (uid, t, t_next);
 "
@@ -98,29 +98,32 @@ source("02b_fix_masts.R")
 # --- Fix the DCL Table --------------------------------------------------------
 # ------------------------------------------------------------------------------
 
+# WARNING !!! I expcicitly eclude cell = -1 and area != -1 from the data
+#             This might need to be revisited at some later stage.
 q <- "
+DELETE FROM device_cell_location WHERE cid = '-1' AND lac != '-1';
 ALTER TABLE device_cell_location
   ADD COLUMN cell numeric,
   ADD COLUMN area NUMERIC,
   ADD COLUMN mcc numeric,
-  ADD COLUMN net numeric;
-  ADD COLUMN id_dcl BIGSERIAL;
+  ADD COLUMN net numeric,
+  ADD COLUMN id_dcl BIGSERIAL,
   ADD COLUMN t_next timestamp with time zone;
   ALTER TABLE device_cell_location ADD COLUMN day SMALLINT;
   ALTER TABLE device_cell_location ADD COLUMN day_next SMALLINT;
 UPDATE device_cell_location
   SET cell = force_cast(cid),
-  SET area = force_cast(lac),
-  SET mcc = force_cast(substr(operator_numeric, 1, 3)),
-  SET net = force_cast(substr(operator_numeric, 4, 2)),
-  SET day = EXTRACT(DOY FROM t), 
-  DROP COLUMN cid,
-  DROP COLUMN lac,
-  DROP COLUMN operator_numeric;
+    area = force_cast(lac),
+    mcc = force_cast(substr(operator_numeric, 1, 3)),
+    net = force_cast(substr(operator_numeric, 4, 2)),
+    day = EXTRACT(DOY FROM t);
+ALTER TABLE device_cell_location DROP COLUMN cid;
+ALTER TABLE device_cell_location DROP COLUMN lac;
+ALTER TABLE device_cell_location DROP COLUMN operator_numeric;
 UPDATE device_cell_location as a
-  SET t_next = b.t_next
+  SET t_next = b.t_next, day_next = b.day_next
   FROM (
-    SELECT id_dcl, lead(t,1) OVER W as t_next, 
+    SELECT id_dcl, lead(t,1) OVER W as t_next,
       EXTRACT(DOY FROM LEAD(t, 1) OVER w) as day_next
     FROM device_cell_location
     WINDOW w AS (PARTITION BY uid ORDER BY t ASC)
@@ -128,13 +131,64 @@ UPDATE device_cell_location as a
   WHERE b.id_dcl = a.id_dcl;
 
 ALTER TABLE device_cell_location ADD CONSTRAINT dcl_pk PRIMARY KEY (id_dcl);
-ALTER TABLE device_cell_location ADD CONSTRAINT dcl_id_masts_fk FOREIGN KEY 
-  (id_masts) REFERENCES masts(id_masts);
 CREATE INDEX dcl_mast_connection ON device_cell_location (mcc, net, area, cell);
-CREATE INDEX dcl_id_masts ON device_cell_location(id_masts);
 CREATE INDEX dcl_uid_day_day_next ON device_cell_location(uid, day, day_next);
+CREATE INDEX dcl_uid_time_time_next ON device_cell_location(uid, t, t_next);
 "
-dbGetQuery(con, q)
+system.time(dbGetQuery(con,q))
+# 2016-06-13: 357 (erster teil mit updates) + 75 (indices)
+
+# ------------------------------------------------------------------------------
+# --- User Preferences ---------------------------------------------------------
+# ------------------------------------------------------------------------------
+
+# Starts the table with user preferences. Here the proportion of connections
+#   To LTE antennae. (choice: > 10% means LTE-Capability)
+q <- "
+DROP TABLE IF EXISTS user_characteristics;
+CREATE TABLE user_characteristics as 
+SELECT uid, avg(case when b.radio = 'LTE' then 1 else 0 end) as lte
+FROM device_cell_location a left join masts b
+ON a.mcc = b.mcc and a.net = b.net and a.area = b.area and
+  a.cell = b.cell
+GROUP BY uid;
+"
+dbGetQuery(con,q)
+
+# ------------------------------------------------------------------------------
+# --- Add masts-info to DCL ----------------------------------------------------
+# ------------------------------------------------------------------------------
+
+# The 4-info-identifier is not unique. We assign the mast with the highest
+# radio level available to the user (UMTS or LTE)
+# rule: above 10% LTE connections means the phone is LTE-capable.
+
+q <- "
+ALTER TABLE device_cell_location ADD COLUMN id_masts BIGINT;
+UPDATE device_cell_location AS z
+set id_masts = d.id_masts
+FROM 
+  (SELECT 
+    a.id_dcl, last_value(c.id_masts) over (PARTITION BY a.id_dcl 
+    ORDER BY c.radio_level ASC) as id_masts
+  FROM
+    device_cell_location a 
+    JOIN user_characteristics b
+      ON a.uid = b.uid
+    JOIN masts c
+      ON a.mcc = c.mcc and a.net = c.net and a.area = c.area and a.cell = c.cell
+      WHERE c.radio_level <= case when b.lte > 0.1 then 3 else 2 end) d
+WHERE d.id_dcl = z.id_dcl;
+;
+ALTER TABLE device_cell_location 
+  ADD CONSTRAINT device_cell_location_id_masts_fk 
+  FOREIGN KEY (id_masts) 
+  REFERENCES masts(id_masts);
+CREATE INDEX dcl_id_masts ON device_cell_location(id_masts);
+"
+system.time(dbGetQuery(con,q))
+# 2016-06-13: 468 secounds.
+# 2016-06-13: 391 secounds. (nach ausschluss der -1/>-1 punkte)
 
 # ------------------------------------------------------------------------------
 # --- Gather CDR data ----------------------------------------------------------
@@ -188,52 +242,8 @@ t <- dbGetQuery(con, q)
 # ;"
 # t <- dbGetQuery(con, q)
 
-# --- 
-
-# --- Next we need additions to the GPS table ----------------------------------
-# It has added information on 
-#   the status of the phone (service level)
-#   the connected masts (interpretable if the status is not 3)
-#   the closest mast of the same level as the connected mast
-# Also it creates a new record if any of the added information changes.
-# As a last information, the time to the next gps-fix is provided
-# Also, exclude points that do not lie within estonia.
-
-# One source of error can be the fact that the system clock can be messed up.
-# This has hardly any influence, but ideally would be considered. 
-# select uid, max(t2 - t) as timediff, 
-#   sum(case when t2 - t > '2 hours' then 1 else 0 end) as anz,
-#   avg(case when t2 - t > '2 hours' then 1 else 0 end) as avg 
-#   from gps group by uid order by avg desc;
-# Simply having the wrong time in and of itself would not be that much of a big
-# deal (although the weekdays/time schedules could get messed up)
-# The problem comes from the fact when the same date/time combination gets
-# Overwritten multiple times. The result would be implausible jumps between
-#   two locations.
-# As the problem is "small" I choose to ignore it for the time being.
-# --> Always use t (even in the gps case where I would have the actual time)
-# --> Note the timediff at every point, for future use.
-
-
 # ------------------------------------------------------------------------------
-# --- User Preferences ---------------------------------------------------------
-# ------------------------------------------------------------------------------
-
-# Starts the table with user preferences. Here the proportion of connections
-#   To LTE antennae. (choice: > 10% means LTE-Capability)
-q <- "
-DROP TABLE IF EXISTS user_characteristics;
-CREATE TABLE user_characteristics as 
-SELECT uid, avg(case when b.radio = 'LTE' then 1 else 0 end) as lte
-FROM device_cell_location a left join masts b
-ON a.mcc = b.mcc and a.net = b.net and a.area = b.area and
-  a.cell = b.cell
-GROUP BY uid;
-"
-dbGetQuery(con,q)
-
-# ------------------------------------------------------------------------------
-# --- Gaps Table ---------------------------------------------------------------
+# --- Gaps Table (not gps) -----------------------------------------------------
 # ------------------------------------------------------------------------------
 d_heartbeat <- "'13 min'"
 
@@ -267,23 +277,25 @@ CREATE INDEX gaps_uid_time ON gaps (uid, t_start, t_end);
 dbGetQuery(con,q)
 
 # ------------------------------------------------------------------------------
-# --- Gaps on GPS ------- ------------------------------------------------------
+# --- Gaps on GPS --------------------------------------------------------------
 # ------------------------------------------------------------------------------
 d_gps_t <- "'5 min'"
 d_gps_s <- 500
+d_gps_t_large <- "'2 days'"
 # 2: spatial and distance threshold
 # 3: user pause
 # 5: heartbeat
 # 7: ausserhalb estlands
+# 9: temporal threshold for really big gaps
 
 q <- paste0("
-ALTER TABLE gps DROP COLUMN IF EXISTS flag_problem;
 ALTER TABLE gps ADD COLUMN flag_problem INTEGER;
 UPDATE gps SET flag_problem = 1;
 UPDATE gps SET flag_problem = flag_problem * 2
     WHERE AGE(t_next, t) > ", d_gps_t, " AND 
     ST_DISTANCE(ST_TRANSFORM(geom, 3301), ST_TRANSFORM(geom_next, 3301)) > ",
             d_gps_s, ";
+
 UPDATE gps as a 
   SET flag_problem = flag_problem * 3
   FROM (
@@ -322,75 +334,148 @@ EE@polygons[[1]]@Polygons[[mainland]] %>% list %>% Polygons(ID = 1) %>% list %>%
 # leaflet() %>% addTiles %>% addPolygons(data = EEm)
 dbWriteSpatial(con, EEm, tablename = "geog_shapes")
 
-q <- "
+q <- paste0("
 UPDATE gps as a SET flag_problem = flag_problem * 7
 FROM geog_shapes b
-WHERE NOT ST_CONTAINS(b.geom, a.geom)
-;"
+WHERE NOT ST_CONTAINS(b.geom, a.geom);
+
+UPDATE gps SET flag_problem = flag_problem * 9
+    WHERE AGE(t_next, t) > ", d_gps_t_large, ";
+ALTER TABLE gps ADD COLUMN problem_proximity SMALLINT;
+
+UPDATE gps as a SET problem_proximity = b.problem_proximity 
+  FROM (
+    SELECT id_gps, 
+      case when lead(flag_problem, 1) over w > 1 then 2 else 1 end * 
+      case when lag(flag_problem, 1) over w > 1 then 3 else 1 end as 
+      problem_proximity
+    FROM gps
+    WINDOW w AS (PARTITION BY uid ORDER BY t ASC)
+  ) b
+  WHERE a.id_gps = b.id_gps;
+")
 dbGetQuery(con,q)
-
-
-
-
 
 # ------------------------------------------------------------------------------
-# --- mast info on dcl
+# --- GPS + GSM  ---------------------------------------------------------------
+# ------------------------------------------------------------------------------
 
-
-# --- Prestep: add level to device_cell_location
-# muss überarbeitet werden.
-# Somehow this takes 45 minutes. Try to optimise for next time
-system.time({
+# --- Create the gps_gsm table
+# The following query would do the job but has an incredible runtime
+# Therefore we split it into 4 cases: where gps/dcl has/has not day=day_next 
+#   and then take the union of those 4 cases.
+# q <- "
+# EXPLAIN (verbose, analyze, buffers) 
+#   CREATE TABLE gps_gsm AS
+#   SELECT a.uid, a.id_gps, b.id_dcl, c.id_masts, a.geom AS geom_gps,
+#     GREATEST(a.t, b.t) AS t_start,
+#     LEAST(a.t_next, b.t_next) AS t_end, b.net, c.geom AS geom_mast,
+#     c.neighbour_avg_dist, c.neighbour_max_dist, c.neighbour_area, c.samples,
+#     c.radio_level,
+#     ST_DISTANCE(ST_TRANSFORM(a.geom, 3301), ST_TRANSFORM(c.geom, 3301)) AS dist
+#   FROM
+#     gps a
+#     JOIN device_cell_location b
+#       ON a.uid = b.uid and 
+#         b.t <= a.t_next and b.t_next > a.t and
+#       b.t_next is not null and a.t_next is not null
+#     JOIN masts c
+#       ON b.id_masts = c.id_masts
+#   WHERE c.mcc = 248 and a.flag_problem = 1
+# ;"
 q <- "
-DROP TABLE IF EXISTS temp CASCADE;
-CREATE TABLE temp AS 
-SELECT a.id_dcl, 
-  max(c.radio_level) as radio_level
-FROM 
-  device_cell_location a LEFT JOIN
-  user_characteristics b
-    ON a.uid = b.uid 
-  LEFT JOIN masts c
-    ON
-    c.mcc = a.mcc and 
-    c.net = a.net and 
-    c.area = a.area and 
-    c.cell = a.cell and 
-    c.radio_level <= case when b.lte > 0.1 then 3 else 2 end
-GROUP BY a.id_dcl
-;
-CREATE INDEX temp_idx ON temp(id_dcl);
-ALTER TABLE device_cell_location ADD COLUMN radio_level numeric;
-UPDATE device_cell_location as a
-SET radio_level = b.radio_level
-FROM temp b
-WHERE a.id_dcl = b.id_dcl;
-"
-dbGetQuery(con,q)
-})
+ANALYZE gps;
+ANALYZE device_cell_location;
+CREATE TABLE gps_gsm AS
 
-# --- Add the mast_id to the connection table
+/* Part one: large but with indexes */
+SELECT a.uid, a.id_gps, b.id_dcl, c.id_masts, a.geom AS geom_gps,
+    GREATEST(a.t, b.t) AS t_start,
+LEAST(a.t_next, b.t_next) AS t_end, b.net, c.geom AS geom_mast,
+c.neighbour_avg_dist, c.neighbour_max_dist, c.neighbour_area, c.samples,
+c.radio_level,
+ST_DISTANCE(ST_TRANSFORM(a.geom, 3301), ST_TRANSFORM(c.geom, 3301)) AS dist
+FROM
+gps a
+JOIN device_cell_location b
+ON a.uid = b.uid and 
+b.t <= a.t_next and b.t_next > a.t and a.day = b.day and a.day = a.day_next and b.day = b.day_next and
+b.t_next is not null and a.t_next is not null
+JOIN masts c
+ON b.id_masts = c.id_masts
+WHERE c.mcc = 248 and a.flag_problem = 1
+UNION ALL
+
+/* Part two: day overlap on gps*/
+SELECT a.uid, a.id_gps, b.id_dcl, c.id_masts, a.geom AS geom_gps,
+    GREATEST(a.t, b.t) AS t_start,
+    LEAST(a.t_next, b.t_next) AS t_end, b.net, c.geom AS geom_mast,
+    c.neighbour_avg_dist, c.neighbour_max_dist, c.neighbour_area, c.samples,
+    c.radio_level,
+    ST_DISTANCE(ST_TRANSFORM(a.geom, 3301), ST_TRANSFORM(c.geom, 3301)) AS dist
+  FROM
+    gps a
+    JOIN device_cell_location b
+      ON a.uid = b.uid and 
+        b.t <= a.t_next and b.t_next > a.t and a.day != a.day_next and b.day = b.day_next and
+      b.t_next is not null and a.t_next is not null
+    JOIN masts c
+      ON b.id_masts = c.id_masts
+  WHERE c.mcc = 248 and a.flag_problem = 1
+UNION ALL
+
+/* Part three: day overlap on dcl*/
+SELECT a.uid, a.id_gps, b.id_dcl, c.id_masts, a.geom AS geom_gps,
+    GREATEST(a.t, b.t) AS t_start,
+    LEAST(a.t_next, b.t_next) AS t_end, b.net, c.geom AS geom_mast,
+    c.neighbour_avg_dist, c.neighbour_max_dist, c.neighbour_area, c.samples,
+    c.radio_level,
+    ST_DISTANCE(ST_TRANSFORM(a.geom, 3301), ST_TRANSFORM(c.geom, 3301)) AS dist
+  FROM
+    gps a
+    JOIN device_cell_location b
+      ON a.uid = b.uid and 
+        b.t <= a.t_next and b.t_next > a.t and a.day = a.day_next and b.day != b.day_next and
+      b.t_next is not null and a.t_next is not null
+    JOIN masts c
+      ON b.id_masts = c.id_masts
+  WHERE c.mcc = 248 and a.flag_problem = 1
+UNION ALL
+
+/* Part four: day overlap on gps and dcl*/
+SELECT a.uid, a.id_gps, b.id_dcl, c.id_masts, a.geom AS geom_gps,
+    GREATEST(a.t, b.t) AS t_start,
+    LEAST(a.t_next, b.t_next) AS t_end, b.net, c.geom AS geom_mast,
+    c.neighbour_avg_dist, c.neighbour_max_dist, c.neighbour_area, c.samples,
+    c.radio_level,
+    ST_DISTANCE(ST_TRANSFORM(a.geom, 3301), ST_TRANSFORM(c.geom, 3301)) AS dist
+  FROM
+    gps a
+    JOIN device_cell_location b
+      ON a.uid = b.uid and 
+        b.t <= a.t_next and b.t_next > a.t and a.day != a.day_next and b.day != b.day_next and
+      b.t_next is not null and a.t_next is not null
+    JOIN masts c
+      ON b.id_masts = c.id_masts
+  WHERE c.mcc = 248 and a.flag_problem = 1
+;"
+Sys.time()
+system.time(t <- dbGetQuery(con,q))
+t
+# Over night to 2016-06-01: 9259, i.e. 2.6 h
+# 2016-06-03 after some optimisation: 7850, i.e. 2.1h
+# 2016-06-10 1h when indexing on days
+# Auf neuem Server und auf 4 Teile aufgeteilt: 648, i.e. ca 10 minuten.
+
+
 q <- "
-ALTER TABLE device_cell_location ADD COLUMN id_masts BIGINT;
-UPDATE device_cell_location AS z
-set id_masts = d.id_masts
-FROM 
-	(SELECT a.id_dcl, 
-    last_value(c.id_masts) over (PARTITION BY a.id_dcl 
-                                 ORDER BY c.radio_level asc) as id_masts
-	FROM
-    device_cell_location a LEFT JOIN user_characteristics b
-  ON a.uid = b.uid
-  LEFT JOIN masts c
-  ON a.mcc = c.mcc and a.net = c.net and a.area = c.area and a.cell = c.cell
-  WHERE c.radio_level <= case when b.lte > 0.1 then 3 else 2 end) d
-WHERE d.id_dcl = z.id_dcl;
-;
-ALTER TABLE device_cell_location 
-  ADD CONSTRAINT device_cell_location_id_masts_fk 
-  FOREIGN KEY (id_masts) 
-  REFERENCES masts(id_masts);
+CREATE INDEX gps_gsm_uid ON gps_gsm(uid);
+CREATE INDEX gps_gsm_time ON gps_gsm(t_start, t_end);
+ALTER TABLE gps_gsm ADD CONSTRAINT gps_gsm_ids PRIMARY KEY (id_masts,
+id_gps, t_start, t_end);
+ANALYZE gps_gsm;
 "
-system.time({dbGetQuery(con,q)})
-
+Sys.time()
+system.time(t <- dbGetQuery(con,q))
+dbGetQuery(con,"VACUUM gps_gsm;")
 

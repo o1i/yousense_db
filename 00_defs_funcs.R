@@ -488,3 +488,10 @@ make_spatial_segments <- function(mat, crs = CRS("+init=epsg:4326")){
     data = data.frame(mat)                      
   )
 }
+
+sigmoid <- function(t) 1/(1+exp(-t))
+
+Mode <- function(x) {
+  ux <- unique(x[!is.na(x)])
+  ux[which.max(tabulate(match(x, ux)))]
+}
