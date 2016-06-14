@@ -23,34 +23,48 @@ connect(user = "burkhard",
 Sys.time()
 system.time({
   q <- "
-  select gps_id, id_masts, round(neighbour_avg_dist, 1) as neighbour_avg_dist, 
+  select id_gps, id_masts, round(neighbour_avg_dist, 1) as neighbour_avg_dist, 
 	round(neighbour_max_dist, 1) as neighbour_max_dist, 
 	round(neighbour_area, 1) as neighbour_area, 
-	radio_level, round(dist::numeric, 1) as distance from gps_gsm_old;
+	radio_level, round(dist::numeric, 1) as distance, net, samples,
+  st_x(geom_gps) as gps_x, st_y(geom_gps) as gps_y,
+  st_x(geom_mast) as mast_x, st_y(geom_mast) as mast_y from gps_gsm;
   ;"
   connections <<- dbGetQuery(con,q)
 })
 
-plot(density(log10(connections$neighbour_avg_dist), 
-             na.rm = T, adjust = 4), col = 4)
-lines(density(log10(connections$neighbour_max_dist), 
-             na.rm = T, adjust = 4), col = 2)
+# Plot average and max distance of masts (weighted by usage)
+plot( density(log10(connections$neighbour_avg_dist[connections$net == 1]), 
+             na.rm = T, adjust = 4), lty = 1, col = 1)
+lines(density(log10(connections$neighbour_max_dist[connections$net == 1]), 
+             na.rm = T, adjust = 4), lty = 2, col = 1)
+lines(density(log10(connections$neighbour_avg_dist[connections$net == 2]), 
+             na.rm = T, adjust = 4), lty = 1, col = 2)
+lines(density(log10(connections$neighbour_max_dist[connections$net == 2]), 
+              na.rm = T, adjust = 4), lty = 2, col = 2)
+lines(density(log10(connections$neighbour_avg_dist[connections$net == 3]), 
+             na.rm = T, adjust = 4), lty = 1, col = 3)
+lines(density(log10(connections$neighbour_max_dist[connections$net == 3]), 
+              na.rm = T, adjust = 4), lty = 2, col = 3)
 # --> Bimodal distribution between short range (<1500m) and the rest
 # --> insert a middle group between 10^2.75 and 10^3.2 as "middle"
+# --> Maybe provider 3 is a bit worse in rural areas, but we will ignore
+#     This for now
+
+# Ratio between max and avg
 plot(density(connections$neighbour_max_dist/connections$neighbour_avg_dist,
              na.rm = T, adjust = 5))
 # --> the differences between max and avg are not that significant and fairly
 #     constant. probably one can take either.
 
-# --- Test for state = 0
-i_state0 <- connections$state == 0  # about 95% are state 0
-f_state0 <- ecdf(connections$distance[i_state0] / 
-                   connections$neighbour_avg_dist[i_state0])
-f_state1 <- ecdf(connections$distance[!i_state0] / 
-                   connections$neighbour_avg_dist[!i_state0])
-plot( 1:10, f_state0(1:10), type = "b", col = "darkgreen")
-lines(1:10, f_state1(1:10), type = "b", col = "lightgreen")
-# --> surprisingly little difference between the states
+# Test for a difference sampling rate between providers.
+plot( density(log10(connections$samples[connections$net == 1]),
+              na.rm = T, adjust = 5), col = 1)
+lines(density(log10(connections$samples[connections$net == 2]),
+              na.rm = T, adjust = 5), col = 2)
+lines(density(log10(connections$samples[connections$net == 3]),
+              na.rm = T, adjust = 5), col = 3)
+# --> all three telcos have a similar distribution of samples
 
 # --- Classification by avg distances
 i_low  <- connections$neighbour_avg_dist <  10^2.75
@@ -65,7 +79,9 @@ f_avg_dist_2 <- ecdf(connections$distance[i_mid] /
                        connections$neighbour_avg_dist[i_mid])
 f_avg_dist_3 <- ecdf(connections$distance[i_high] / 
                        connections$neighbour_avg_dist[i_high])
-plot(1:10, f_avg_dist_1(1:10), type = "b", col = "darkblue")
+plot(1:10, f_avg_dist_1(1:10), type = "b", col = "darkblue",
+     main = "CDF of connections within multiples of avg dist.",
+     ylab = "Fraction", xlab = "Multiple")
 lines(1:10, f_avg_dist_2(1:10), type = "b", col = 4)
 lines(1:10, f_avg_dist_3(1:10), type = "b", col = "lightblue")
 
@@ -79,6 +95,8 @@ f_max_dist_3 <- ecdf(connections$distance[i_high] /
 lines(1:10, f_max_dist_1(1:10), type = "b", col = "darkred")
 lines(1:10, f_max_dist_2(1:10), type = "b", col = 2)
 lines(1:10, f_max_dist_3(1:10), type = "b", col = "pink")
+# --> In areas where the mast density is low the voronoi cells are already 
+#     relatively big, so one does not have to multiply by much.
 
 # question: at given quantiles of gps-connections, does avg or max give smaller
 # areas?
@@ -108,21 +126,67 @@ length(unique(connections[i_all, "id_masts"])) /
 # --> the top 10% of relative deviations come from 0.01% of the masts. something
 #     seems to be wrong here.
 
+# What is the distribution of the "true" distance?
+plot(density(log10(pmax(1, connections$distance)), na.rm = T, adjust = 5),
+     main = "Distance from mast")
+lines(density(log10(pmax(1, connections$distance[i_low])), na.rm = T, adjust = 5), col = 2)
+lines(density(log10(pmax(1, connections$distance[i_mid])), na.rm = T, adjust = 5), col = 3)
+lines(density(log10(pmax(1, connections$distance[i_high])), na.rm = T, adjust = 5), col = 4)
+
+
+# What multiple of avg or max distance should be taken?
 connections$rel_dist_avg <- connections$distance / 
   pmax(200, connections$neighbour_avg_dist)
 info_by_mast <- as.data.frame(as.matrix(aggregate(
   connections$rel_dist_avg, 
   by = list(connections$id_masts),
-  FUN = function(n) c(min(n), mean(n), max(n), length(n)))))
-info_by_mast <- subset(info_by_mast,!is.na(x.1))
-plot(density(log10(info_by_mast$x.1)))
-rug(log10(info_by_mast$x.1))
-plot(10^seq(0, 2, l = 20), ecdf(log10(info_by_mast$x.1))(seq(0, 2, l = 20)),
+  FUN = function(n) c(quantile(n, 0.1, na.rm=T), 
+                      mean(n), 
+                      quantile(n, 0.9, na.rm=T), length(n)))))
+colnames(info_by_mast) <- c("mast", "q75", "mean", "q90", "count")
+info_by_mast <- subset(info_by_mast,!is.na(q10))
+par(mfrow=c(3, 2))
+plot(density(log10(info_by_mast$q75)), 
+     main = "log10 of q75(distance) / mean distance")
+rug(log10(info_by_mast$q10))
+plot(10^seq(0, 2, l = 20), ecdf(log10(info_by_mast$q10))(seq(0, 2, l = 20)),
      log = "x")
+plot(density(log10(info_by_mast$mean)), 
+     main = "log10 of mean(distance) / mean distance")
+rug(log10(info_by_mast$mean))
+plot(10^seq(0, 2, l = 20), ecdf(log10(info_by_mast$mean))(seq(0, 2, l = 20)),
+     log = "x")
+plot(density(log10(info_by_mast$q90)), 
+     main = "log10 of q90(distance) / mean distance")
+rug(log10(info_by_mast$q90))
+plot(10^seq(0, 2, l = 20), ecdf(log10(info_by_mast$q90))(seq(0, 2, l = 20)),
+     log = "x")
+par(mfrow = c(1, 1))
+# --> not too informative
 
+# what are the "isolines" of multipliers for a given quantile of "closer than"?
+bin_size <- 200
+ti <- connections$neighbour_avg_dist < 10000
+x <- aggregate(connections$rel_dist_avg[ti], 
+               by = list(connections$neighbour_avg_dist[ti] %/% bin_size),
+               FUN = function(v) quantile(v, 
+                                          c(0.5, 0.66, 0.75, 0.8, 0.9, 0.95)))
+plot( x$Group.1 * bin_size, smooth.spline(x$x[, 6])$y, 
+      main = "Multipliers for quantiles", ylim = c(0, 5), type = 'l')
+lines(x$Group.1 * bin_size, smooth.spline(x$x[, 5])$y, col = 5)
+lines(x$Group.1 * bin_size, smooth.spline(x$x[, 4])$y, col = 4)
+lines(x$Group.1 * bin_size, smooth.spline(x$x[, 3])$y, col = 3)
+lines(x$Group.1 * bin_size, smooth.spline(x$x[, 2])$y, col = 2)
+lines(x$Group.1 * bin_size, smooth.spline(x$x[, 1])$y, col = 1)
+legend("topright", col = 1:6, lwd = 2, legend = paste("q", colnames(x$x)))
+# --> effect is surprisingly linear (can also be seen when plotting points)
+# --> use this in the distance function
+lm(x$x[, "75%"] ~I(x$Group.1 * bin_size))$coefficients
+# intercept: 2.6289316954 slope: -0.0002054995 
+               
 # --> lets have a look at some of the weirder masts
 q <- "
-SELECT gps_id, ST_X(geom_gps) AS gps_x, ST_Y(geom_gps) AS gps_y,
+SELECT id_gps, ST_X(geom_gps) AS gps_x, ST_Y(geom_gps) AS gps_y,
 ST_X(geom_mast) as mast_x, ST_Y(geom_mast) AS mast_y, id_masts
 FROM gps_gsm WHERE id_masts IN (
 SELECT id_masts
@@ -142,6 +206,8 @@ mast_coords <- cbind(aggregate(plot_points$mast_x,
                                by = list(plot_points$id_masts), 
                                FUN = mean))[, -3]
 
+
+
 library(sp)
 library(leaflet)
 library(RColorBrewer)
@@ -151,7 +217,7 @@ points <- SpatialPoints(plot_points[, c("gps_x", "gps_y")],
 leaflet() %>% addTiles() %>% 
   addCircleMarkers(data = points, 
                    color = cols[match(plot_points$id_masts, example_masts)],
-                   popup = as.character(plot_points$gps_id)) %>%
+                   popup = as.character(plot_points$id_gps)) %>%
   addMarkers(mast_coords[, 2], mast_coords[, 3], 
              popup = as.character(mast_coords$Group.1)) %>%
   addCircleMarkers(mast_coords[, 2], mast_coords[, 3],

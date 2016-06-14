@@ -495,3 +495,12 @@ Mode <- function(x) {
   ux <- unique(x[!is.na(x)])
   ux[which.max(tabulate(match(x, ux)))]
 }
+
+tricube <- function(x) 70/81*pmax(0, 1 - abs(x)^3)^(1/3)
+epa <- function(x) 3/4*pmax(0, 1 - x^2)
+mean_harm <- function(a, b) 1/(1/a + 1/b)
+mean_geom <- function(a, b) sqrt(a*b)
+  
+  
+  
+  
