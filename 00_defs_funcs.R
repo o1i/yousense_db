@@ -225,17 +225,34 @@ dbWriteSpatial <- function(con, spatial.df, schemaname="public", tablename,
 
 # --- Functions for the presentation -------------------------------------------
 
-naive_segmentation <- function(df, dt, dsp, dt_break, dt_short, ds_short){
+naive_segmentation <- function(df, dt, dsp, dt_break, dt_short, ds_short,
+                               problem = ""){
   # df        data frame with (ordered) points. contains t, x and y
   # dt        time threshold for first segmentation
   # dsp       spatial threshold for first segmentation
   # dt_break  time threshold to split a move segment if distance between two
-  #            points is too large
+  #           points is too large
   # dt_short  time threshold for too short moves
   # ds_short  spatial threshold for too short moves
+  # problem   denotes whether the "segment" is invalid (cf gps_gsm)
   
   library(plyr)
   library(geosphere)
+  
+  if(problem == ""){
+    valid <- rep(T, nrow(df))
+  }else{
+    # The following reduces invalid segments to gaps between two valid segments
+    # --> the only necessary info to be saved is whether the gap following a
+    #     segment is valid or not, if invalid gaps always are at the boundaries
+    #     of valid segments. (which they are because they stop any segment)
+    df <- df[!(df[, problem] > 1 & c(F, df[-nrow(df), problem] > 1)), ]
+    valid <- df[, problem] == 1
+    df$valid <- valid
+    df$valid_previous <- c(T, valid[-nrow(df)])
+  }
+  
+  # --- Step 1: detect stops using thresholds 
   df <- df[order(df$t), ]
   n <- nrow(df)
   diff_sp <- diff_t <- array(NA, dim = c(n, 2 * dt + 1))
@@ -246,25 +263,41 @@ naive_segmentation <- function(df, dt, dsp, dt_break, dt_short, ds_short){
     diff_sp[, dt + 1 - i_] <- c(rep(F, i_), 
                                 distHaversine(df[-c(1:i_), c("x", "y")],
                                               df[-c((n - i_ + 1):n), 
-                                                 c("x", "y")]) < dsp)
+                                                 c("x", "y")]) < dsp) 
+    
     diff_t[, dt + 1 - i_] <- c(rep(0, i_),
                                difftime(df[-c((n - i_ + 1):n), c("t")],
                                         df[-c(1:i_), c("t")],
                                         units = "secs"))
   }
+  # Set spatial distances to "too big" for invalid segments. as the starting
+  #   point (spatiotemporal) is still okay, the looking back and the looking 
+  #   forward part are treated differently (as t is the beginning time point)
+  # This can be achieved by shifting the matrix by one on the looking forward
+  #   part
+  diff_sp[, 1:dt] <- diff_sp[, 1:dt] &
+    !((outer(1:nrow(df), 1:dt, "+") -dt-1) %in% which(!valid))
+  
   # Rechts der Mitte (nach vorne schauen)
   for(i_ in 1:dt){
     diff_sp[, dt + 1 + i_] <- c(distHaversine(df[-c((n - i_ + 1):n), 
                                                  c("x", "y")],
                                               df[-c(1:i_), c("x", "y")]) < 
-                                  dsp,rep(F, i_))
+                                  dsp,rep(F, i_)) 
+    
     diff_t[, dt + 1 + i_] <- c(difftime(df[-c(1:i_), c("t")],
                                         df[-c((n - i_ + 1):n), c("t")],
                                         units = "secs"), 
                                rep(0, i_))
   }
-  # Test, ob die Differenzen schön aufsteigend sind (ausser an den Ecken)
+  
+  diff_sp[, (dt+2):(2*dt + 1)] <- diff_sp[, (dt+2):(2*dt + 1)] &
+    !((outer(1:nrow(df), (dt+1):(2*dt), "+") -dt-1) %in% which(!valid))
+  
+  # Test, ob die zeitl. Differenzen schön aufsteigend sind (ausser an den Ecken)
   # sum(apply(diff_t, 1, function(v) any(diff(v) < 0 ))) == 2 * (dt-1)
+  
+
   
   diff_sp[, (dt + 1):(2*dt + 1)] <- t(apply(diff_sp[, (dt + 1):(2*dt + 1)], 
                                             1, 
@@ -284,10 +317,13 @@ naive_segmentation <- function(df, dt, dsp, dt_break, dt_short, ds_short){
   
   df$stop <- apply(diff_t, 1, FUN = function(v) max(v) - min(v) >= (dt * 60))  
   
+  # --- Step 2: remove short movement segments if they are surrounded by stops 
+  #             that are close together in space and time
+  # Stop segments are already clean, but move segments need to be broken at
+  #   invalid points.
+  df$segment <- c(0, cumsum(abs(diff(df$stop)))) + 
+    cumsum(c(0, !valid[-nrow(df)]))
   
-  # remove short movement segments if they are surrounded by stops that
-  #   are close together in space and time
-  df$segment = c(0, cumsum(abs(diff(df$stop))))
   temp <- ddply(df, .variables = c("segment", "stop"), .fun = function(df_){
     df_ <- df_[order(df_$t), ]
     n <- nrow(df_)
@@ -299,7 +335,9 @@ naive_segmentation <- function(df, dt, dsp, dt_break, dt_short, ds_short){
                       t_end = df_[n, "t"],
                       x_end = df_[n, "x"],
                       y_end = df_[n, "y"],
-                      gps_id = df_[1, "gps_id"]))
+                      id_gps = df_[1, "id_gps"],
+                      valid_back = df_[1, "valid_previous"],
+                      valid_forward = df_[n, "valid"]))
   })
   
   sandwich <- !temp$stop & c(F, temp$stop[-nrow(temp)]) & c(temp$stop[-1], F) &
@@ -307,13 +345,17 @@ naive_segmentation <- function(df, dt, dsp, dt_break, dt_short, ds_short){
              c(temp$t_end[1], temp$t_end[-nrow(temp)]), 
              units = "secs") < dt_short & 
     distHaversine(temp[c(2:nrow(temp), nrow(temp)), c("x_beg", "y_beg")], 
-                  temp[c(1, 1:(nrow(temp) - 1)), c("x_end", "y_end")]) < ds_short
+                  temp[c(1, 1:(nrow(temp) - 1)), c("x_end", "y_end")]) < 
+    ds_short & temp$valid_back & temp$valid_forward
+  
+  
   df[df$segment %in% temp[sandwich, "segment"], "stop"] <- T
   
   # Zuteilung der Segmente
-  df$segment = c(0, cumsum(abs(diff(df$stop))))
+  df$segment <- c(0, cumsum(abs(diff(df$stop)))) + 
+    cumsum(c(0, !valid[-nrow(df)]))
   
-  # Split segments with long breaks in them
+  # --- Step 3: Split segments with long breaks in them
   for(i_ in 1:(nrow(df)-1)){
     if(as.numeric(abs(difftime(df$t[i_], 
                                df$t[i_ + 1], units = "mins"))) > dt_break & 
@@ -321,8 +363,6 @@ naive_segmentation <- function(df, dt, dsp, dt_break, dt_short, ds_short){
       df$segment[(i_ + 1):nrow(df)] <- df$segment[(i_+1):nrow(df)] + 1
     }
   }
-  
-  # df$segment = c(0, cumsum(abs(diff(df$segment))))
   
   return(df)
 }
@@ -333,40 +373,47 @@ naive_segmentation <- function(df, dt, dsp, dt_break, dt_short, ds_short){
 naive_simplification <- function(df, ds, simplify_stops = 0, n = 1){
   df <- df[order(df$t), ]
   segments <- ddply(df, "segment", function(df_){
-    return(data.frame(gps_id = df_[1, "gps_id"],
-                      gps_id_end = df_[nrow(df_), "gps_id"],
-                      tmin = df_[1, "t"],
-                      tmax = df_[nrow(df_), "t"],
+    return(data.frame(id_gps = df_[1, "id_gps"],
+                      id_gps_end = df_[nrow(df_), "id_gps"],
+                      t_start = df_[1, "t"],
+                      t_end = df_[nrow(df_), "t"],
                       stop = df_[1, "stop"],
                       x_mean = mean(df_[, "x"]),
                       y_mean = mean(df_[, "y"]),
                       x_start = df_[1, "x"],
                       x_end = df_[nrow(df_), "x"],
                       y_start = df_[1, "y"],
-                      y_end = df_[nrow(df_), "y"]))
+                      y_end = df_[nrow(df_), "y"],
+                      valid_start = df_[1, "valid_previous"],
+                      valid_end = df_[nrow(df_), "valid"]))
   })
   
   # --- Clean up segments
   seg2 <- segments
   j_ <- 1
   for(i_ in 2:nrow(segments)){
-    # If a stop follows a stop and they are close, put them together
+    # If a stop follows a stop and they are close and the gap between them is
+    #   valid, put them together
     #   Exponential weighting to make matches more probable
     if(seg2[j_, "stop"] == T & segments[i_, "stop"] == T & 
        distHaversine(seg2[j_, c("x_mean", "y_mean")], 
-                     segments[i_, c("x_mean", "y_mean")]) < ds){
+                     segments[i_, c("x_mean", "y_mean")]) < ds &
+       seg2[j_, "valid_end"] & segments[i_, "valid_start"]){
       n_ <- segments[i_, ]
-      seg2[j_, "tmax"] <- n_$tmax
+      seg2[j_, "t_end"] <- n_$t_end
       seg2[j_, "x_mean"] <- mean(n_$x_mean, seg2[j_, "x_mean"])
       seg2[j_, "y_mean"] <- mean(n_$y_mean, seg2[j_, "y_mean"])
       seg2[j_, "x_end"] <- n_$x_end
       seg2[j_, "y_end"] <- n_$y_end
+      seg2[j_, "valid_end"] <- n_$valid_end
     }else{
-      # A stop followed by a move lasts until the beginning of the move
+      # A stop followed by a move lasts until the beginning of the move, 
+      #   unless its end-gap is invalid
       if(seg2[j_, "stop"] == T & segments[i_, "stop"] == F & 
          distHaversine(seg2[j_, c("x_mean", "y_mean")], 
-                       segments[i_, c("x_start", "y_start")]) < ds){
-        seg2[j_, "tmax"] <- segments[i_, "tmin"]
+                       segments[i_, c("x_start", "y_start")]) < ds &
+         seg2[j_, "valid_end"]){
+        seg2[j_, "t_end"] <- segments[i_, "t_start"]
       }
       # Also, if there is nothing to put together, the currently active
       #   segment is changed
@@ -443,12 +490,12 @@ naive_simplification <- function(df, ds, simplify_stops = 0, n = 1){
 # # }
 # # df <- int
 # # 
-# int <- subset(seg2, gps_id %in% 5305979:5305990)
-# int <- subset(daten_segmentiert, gps_id %in% 5305979:5305990)
-# int <- subset(df, gps_id %in% 5305979:5305990)
+# int <- subset(seg2, id_gps %in% 5305979:5305990)
+# int <- subset(daten_segmentiert, id_gps %in% 5305979:5305990)
+# int <- subset(df, id_gps %in% 5305979:5305990)
 # int
 # 
-# myp <- SpatialPoints(df[df$gps_id %in% 5305985:5305989, c("x", "y")],
+# myp <- SpatialPoints(df[df$id_gps %in% 5305985:5305989, c("x", "y")],
 #                      CRS("+init=epsg:4326"))
 # m5 <- addCircleMarkers(m, data = myp, color = c("red", rep("orange", 3),
 #                                                 "green"), opacity = 1)
@@ -500,7 +547,69 @@ tricube <- function(x) 70/81*pmax(0, 1 - abs(x)^3)^(1/3)
 epa <- function(x) 3/4*pmax(0, 1 - x^2)
 mean_harm <- function(a, b) 1/(1/a + 1/b)
 mean_geom <- function(a, b) sqrt(a*b)
+
+day_frac <- function(t) as.numeric(difftime(t, as.Date(t), units = "days"))
   
+display_segments <- function(df, cols){
+  # takes a dataframe that comes from the segments table and produces
+  #   a leaflet representation.
+  # Careful: assumes that the time zone conversion has happened already!
+  df <- df[order(df$t_start), ]
+  # --- 1: stops
+  stops <- SpatialPoints(df[df$stop, c("x_mean", "y_mean")], 
+                         CRS("+init=epsg:4326"))
+  col_inds <- as.numeric(floor(unclass(difftime(df[df$stop, "t_start"], 
+                                     as.Date(df[df$stop, "t_start"]), units = "days")) * 
+                      length(cols)) + 1)
+  # --- 2: moves
+  moves <- make_spatial_segments(df[!df$stop, c("x_start", "y_start", 
+                                                "x_end", "y_end")])
+  # --- 3: transitions
+  locations <- df[, c("x_start", "y_start", "x_end", "y_end")]
+  locations[df$stop, c("x_start", "y_start", "x_end", "y_end")] <- 
+    df[df$stop, c("x_mean", "y_mean", "x_mean", "y_mean")]
+  positions <- cbind(locations[-nrow(locations), c("x_end", "y_end")],
+                     locations[-1, c("x_start", "y_start")])
+  transitions <- make_spatial_segments(positions)
   
-  
-  
+  # --- 4: plot
+  leaflet() %>% addTiles() %>%
+    addCircleMarkers(data = stops, color = cols[col_inds]) %>%
+    addPolylines(data = moves, color = "blue") %>%
+    addPolylines(data = transitions, 
+                 color = c("black", "red")[2-df$valid_end[-nrow(df)]])
+}
+
+fill_vector <- function(v){
+  # Fills the NA-holes in a vector with "neighbouring" non-NA information
+  if(is.na(v[1])) v[1:which.max(!is.na(v))] <- v[which.max(!is.na(v))]
+  w <- rev(v)
+  if(is.na(w[1])) w[1:which.max(!is.na(w))] <- w[which.max(!is.na(w))]
+  v <- rev(w)
+  i <- rbind(ave(is.na(v), c(0, cumsum(abs(diff(is.na(v))))), FUN =cumsum),
+             rev(ave(is.na(rev(v)), c(0, cumsum(abs(diff(is.na(rev(v)))))), 
+                     FUN =cumsum)))
+  i2 <- rbind(1:nt - i[1, ], 1:nt + i[2, ])
+  v[i2[cbind(apply(i, 2, which.min), 1:length(v))]]
+}
+
+# ------------------------------------------------------------------------------
+# --- Functions for clustering etc ---------------------------------------------
+# ------------------------------------------------------------------------------
+
+# --- Assessing the difference between two days --------------------------------
+daywarp <- function(d1, d2, d, w = max(length(d1), length(d2)), ...){
+  w <- max(w, abs(length(d1) - length(d2)))
+  score <- matrix(Inf, nrow = length(d1) + 1, ncol = length(d2) + 1)
+  score[1, 1] <- 0
+  for(i_ in 1:length(d1)){
+    for(j_ in max(1, i_ - w):(min(length(d2), i_ + w))){
+      score[i_ + 1, j_ + 1] <- 
+        d(d1[i_], d2[j_], ...) + min(score[i_    , j_ + 1],
+                                     score[i_ + 1, j_    ],
+                                     score[i_    , j_    ])
+    }
+  }
+  return(score[length(score)])
+}
+
