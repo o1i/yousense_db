@@ -34,8 +34,12 @@ system.time({
 })
 
 # Plot average and max distance of masts (weighted by usage)
+jpeg(quality = 100, height = 500, width = 500, 
+     file = "figures/mast_dists.jpeg")
 plot( density(log10(connections$neighbour_avg_dist[connections$net == 1]), 
-             na.rm = T, adjust = 4), lty = 1, col = 1)
+             na.rm = T, adjust = 4), lty = 1, col = 1, 
+      main = "Density of average/max neighbours dists by provider",
+      xlab = "log10 of avg neigh dist")
 lines(density(log10(connections$neighbour_max_dist[connections$net == 1]), 
              na.rm = T, adjust = 4), lty = 2, col = 1)
 lines(density(log10(connections$neighbour_avg_dist[connections$net == 2]), 
@@ -46,24 +50,35 @@ lines(density(log10(connections$neighbour_avg_dist[connections$net == 3]),
              na.rm = T, adjust = 4), lty = 1, col = 3)
 lines(density(log10(connections$neighbour_max_dist[connections$net == 3]), 
               na.rm = T, adjust = 4), lty = 2, col = 3)
+legend("topright", col = 1:3, legend = c(1:3), lwd = 2)
+dev.off()
 # --> Bimodal distribution between short range (<1500m) and the rest
 # --> insert a middle group between 10^2.75 and 10^3.2 as "middle"
 # --> Maybe provider 3 is a bit worse in rural areas, but we will ignore
 #     This for now
 
 # Ratio between max and avg
+jpeg(quality = 100, height = 500, width = 500, 
+     file = "figures/max_div_by_avg.jpeg")
 plot(density(connections$neighbour_max_dist/connections$neighbour_avg_dist,
-             na.rm = T, adjust = 5))
+             na.rm = T, adjust = 5), main = "max_neigh_dist / avg_neigh_dist",
+     xlab = "quotient")
+dev.off()
 # --> the differences between max and avg are not that significant and fairly
 #     constant. probably one can take either.
 
 # Test for a difference sampling rate between providers.
+jpeg(quality = 100, height = 500, width = 500, 
+     file = "figures/samples_by_mast_and_provider.jpeg")
 plot( density(log10(connections$samples[connections$net == 1]),
-              na.rm = T, adjust = 5), col = 1)
+              na.rm = T, adjust = 5), col = 1, 
+      main = "Density of samples per mast in opencellid by provider",
+      xlab = "Number (untransformed!)")
 lines(density(log10(connections$samples[connections$net == 2]),
               na.rm = T, adjust = 5), col = 2)
 lines(density(log10(connections$samples[connections$net == 3]),
               na.rm = T, adjust = 5), col = 3)
+dev.off()
 # --> all three telcos have a similar distribution of samples
 
 # --- Classification by avg distances
@@ -79,8 +94,10 @@ f_avg_dist_2 <- ecdf(connections$distance[i_mid] /
                        connections$neighbour_avg_dist[i_mid])
 f_avg_dist_3 <- ecdf(connections$distance[i_high] / 
                        connections$neighbour_avg_dist[i_high])
+jpeg(quality = 100, height = 500, width = 500, 
+     file = "figures/cdf_connections_by_multiples_of_avg_dist.jpeg")
 plot(1:10, f_avg_dist_1(1:10), type = "b", col = "darkblue",
-     main = "CDF of connections within multiples of avg dist.",
+     main = "CDF of connections within multiples of avg/max dist.",
      ylab = "Fraction", xlab = "Multiple")
 lines(1:10, f_avg_dist_2(1:10), type = "b", col = 4)
 lines(1:10, f_avg_dist_3(1:10), type = "b", col = "lightblue")
@@ -95,6 +112,11 @@ f_max_dist_3 <- ecdf(connections$distance[i_high] /
 lines(1:10, f_max_dist_1(1:10), type = "b", col = "darkred")
 lines(1:10, f_max_dist_2(1:10), type = "b", col = 2)
 lines(1:10, f_max_dist_3(1:10), type = "b", col = "pink")
+legend("bottomright", col = c("darkblue", "blue", "lightblue",
+                              "darkred", "red", "pink"),
+       legend = c("avg_dense", "avg_medium", "avg_sparse",
+                  "max_dense", "max_medium", "max_sparse"), lwd = 2)
+dev.off()
 # --> In areas where the mast density is low the voronoi cells are already 
 #     relatively big, so one does not have to multiply by much.
 
@@ -114,8 +136,14 @@ areas <- sapply(as.character(q), function(qn){
     sum((connections$neighbour_max_dist * 
            dists[qn, 3 + i_all]) ^ 2 * pi / 1e6, na.rm = T))
 })
-plot( q, areas[1, ], type = "b", col = 4)
+jpeg(quality = 100, height = 500, width = 500, 
+     file = "figures/areas_for_quantiles.jpeg")
+plot( q, areas[1, ], type = "b", col = 4, 
+      main = "Circular area required for a given quantile",
+      xlab = "quantile")
 lines(q, areas[2, ], type = "b", col = 2)
+legend("topleft", col = c(2, 4), lwd = 2, legend = c("max", "avg"))
+dev.off()
 # --> max has slightly higher areas overall, so go for average
 # --> up until 0.85 it is fairly "cheap", but later it really starts increasing
 # --> question: is this due to mislabelled masts?
@@ -127,11 +155,18 @@ length(unique(connections[i_all, "id_masts"])) /
 #     seems to be wrong here.
 
 # What is the distribution of the "true" distance?
+jpeg(quality = 100, height = 500, width = 500, 
+     file = "figures/dist_from_masts.jpeg")
 plot(density(log10(pmax(1, connections$distance)), na.rm = T, adjust = 5),
-     main = "Distance from mast")
+     main = "Distance from mast",
+     xlab = "log10 of distance")
 lines(density(log10(pmax(1, connections$distance[i_low])), na.rm = T, adjust = 5), col = 2)
 lines(density(log10(pmax(1, connections$distance[i_mid])), na.rm = T, adjust = 5), col = 3)
 lines(density(log10(pmax(1, connections$distance[i_high])), na.rm = T, adjust = 5), col = 4)
+legend("topright", col = 1:4, 
+       legend = c("overall", "dense masts", "medium masts", "sparse masts"), 
+       lwd = 2)
+dev.off()
 
 
 # What multiple of avg or max distance should be taken?
@@ -140,27 +175,33 @@ connections$rel_dist_avg <- connections$distance /
 info_by_mast <- as.data.frame(as.matrix(aggregate(
   connections$rel_dist_avg, 
   by = list(connections$id_masts),
-  FUN = function(n) c(quantile(n, 0.1, na.rm=T), 
+  FUN = function(n) c(quantile(n, 0.75, na.rm=T), 
                       mean(n), 
                       quantile(n, 0.9, na.rm=T), length(n)))))
 colnames(info_by_mast) <- c("mast", "q75", "mean", "q90", "count")
-info_by_mast <- subset(info_by_mast,!is.na(q10))
+info_by_mast <- subset(info_by_mast,!is.na(q75))
+jpeg(quality = 100, height = 500, width = 500, 
+     file = "figures/q_of_dists_vs_avg_neigh_dist.jpeg")
 par(mfrow=c(3, 2))
+
 plot(density(log10(info_by_mast$q75)), 
      main = "log10 of q75(distance) / mean distance")
-rug(log10(info_by_mast$q10))
-plot(10^seq(0, 2, l = 20), ecdf(log10(info_by_mast$q10))(seq(0, 2, l = 20)),
-     log = "x")
+rug(log10(info_by_mast$q75))
+plot(10^seq(0, 1, l = 20), ecdf(log10(info_by_mast$q75))(seq(0, 1, l = 20)),
+     log = "x", ylab = "ecdf", ylim = c(0, 1), type = "b")
+
 plot(density(log10(info_by_mast$mean)), 
      main = "log10 of mean(distance) / mean distance")
 rug(log10(info_by_mast$mean))
-plot(10^seq(0, 2, l = 20), ecdf(log10(info_by_mast$mean))(seq(0, 2, l = 20)),
-     log = "x")
+plot(10^seq(0, 1, l = 20), ecdf(log10(info_by_mast$mean))(seq(0, 1, l = 20)),
+     log = "x", ylab = "ecdf", ylim = c(0, 1), type = "b")
+
 plot(density(log10(info_by_mast$q90)), 
      main = "log10 of q90(distance) / mean distance")
 rug(log10(info_by_mast$q90))
-plot(10^seq(0, 2, l = 20), ecdf(log10(info_by_mast$q90))(seq(0, 2, l = 20)),
-     log = "x")
+plot(10^seq(0, 1, l = 20), ecdf(log10(info_by_mast$q90))(seq(0, 1, l = 20)),
+     log = "x", ylab = "ecdf", ylim = c(0 ,1), type = "b")
+dev.off()
 par(mfrow = c(1, 1))
 # --> not too informative
 
@@ -171,14 +212,24 @@ x <- aggregate(connections$rel_dist_avg[ti],
                by = list(connections$neighbour_avg_dist[ti] %/% bin_size),
                FUN = function(v) quantile(v, 
                                           c(0.5, 0.66, 0.75, 0.8, 0.9, 0.95)))
+
+jpeg(quality = 100, height = 500, width = 500, 
+     file = "figures/quantile_multipliers_by_avg_neigh_dist.jpeg")
 plot( x$Group.1 * bin_size, smooth.spline(x$x[, 6])$y, 
-      main = "Multipliers for quantiles", ylim = c(0, 5), type = 'l')
+      main = "Multipliers for quantiles", ylim = c(0, 5), type = 'l',
+      xlab = "Avg dist to neighbour",
+      ylab = "Multiplier to get to a given quantile")
 lines(x$Group.1 * bin_size, smooth.spline(x$x[, 5])$y, col = 5)
 lines(x$Group.1 * bin_size, smooth.spline(x$x[, 4])$y, col = 4)
 lines(x$Group.1 * bin_size, smooth.spline(x$x[, 3])$y, col = 3)
 lines(x$Group.1 * bin_size, smooth.spline(x$x[, 2])$y, col = 2)
 lines(x$Group.1 * bin_size, smooth.spline(x$x[, 1])$y, col = 1)
+points(x$Group.1 * bin_size, x$x[, 4], col = 4, cex = 0.1)
+points(x$Group.1 * bin_size, x$x[, 3], col = 3, cex = 0.1)
+points(x$Group.1 * bin_size, x$x[, 2], col = 2, cex = 0.1)
+points(x$Group.1 * bin_size, x$x[, 1], col = 1, cex = 0.1)
 legend("topright", col = 1:6, lwd = 2, legend = paste("q", colnames(x$x)))
+dev.off()
 # --> effect is surprisingly linear (can also be seen when plotting points)
 # --> use this in the distance function
 lm(x$x[, "75%"] ~I(x$Group.1 * bin_size))$coefficients

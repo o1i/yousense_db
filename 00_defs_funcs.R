@@ -549,6 +549,8 @@ mean_harm <- function(a, b) 1/(1/a + 1/b)
 mean_geom <- function(a, b) sqrt(a*b)
 
 day_frac <- function(t) as.numeric(difftime(t, as.Date(t), units = "days"))
+
+softmax <- function(x) exp(x)/sum(exp(x))
   
 display_segments <- function(df, cols){
   # takes a dataframe that comes from the segments table and produces
@@ -598,16 +600,17 @@ fill_vector <- function(v){
 # ------------------------------------------------------------------------------
 
 # --- Assessing the difference between two days --------------------------------
-daywarp <- function(d1, d2, d, w = max(length(d1), length(d2)), ...){
+daywarp <- function(d1, d2, d, w = max(length(d1), length(d2)), 
+                    k = function(i, j) return(0), ...){
   w <- max(w, abs(length(d1) - length(d2)))
   score <- matrix(Inf, nrow = length(d1) + 1, ncol = length(d2) + 1)
   score[1, 1] <- 0
   for(i_ in 1:length(d1)){
     for(j_ in max(1, i_ - w):(min(length(d2), i_ + w))){
       score[i_ + 1, j_ + 1] <- 
-        d(d1[i_], d2[j_], ...) + min(score[i_    , j_ + 1],
-                                     score[i_ + 1, j_    ],
-                                     score[i_    , j_    ])
+        d(d1[i_], d2[j_], ...) + min(score[i_    , j_ + 1] + k(i_, j_ + 1),
+                                     score[i_ + 1, j_    ] + k(i_ + 1, j_ + 1),
+                                     score[i_    , j_    ] + k(i_, j_))
     }
   }
   return(score[length(score)])

@@ -5,3 +5,5 @@
 *.html
 nosafe.txt
 *.csv
+figures*
+results*
