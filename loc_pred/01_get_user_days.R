@@ -193,7 +193,7 @@ get_user_days_c <- function(user_, nt_, level_ = "CDR", fill_avg_dist = 300,
     sapply(1:nrow(pts), function(i_){
       SpatialPoints(pts[i_, c("mast_x", "mast_y"), drop = F],
                     CRS("+init=epsg:3301")) %>%
-        gBuffer(width = pts[i_, "epsdist"] / 4, id = runif(1))
+        gBuffer(width = max(300, pts[i_, "epsdist"] / 4), id = runif(1))
     }) %>% 
       do.call(what = rbind) %>%
       gUnaryUnion(id = rep(cl_, nrow(pts))) 
@@ -211,7 +211,7 @@ get_user_days_c <- function(user_, nt_, level_ = "CDR", fill_avg_dist = 300,
   # Add "masts" as cluster centres and cluster centres to cl_poly_list
   add <- t(sapply(unique(all_masts$cluster[all_masts$cluster > 0]), function(no_){
     c(no_, mean(all_masts[match(no_, all_masts$cluster), "mast_x"]),
-      mean(all_masts[match(no_, all_masts$cluster), "mast_y"]), 0, no_)
+      mean(all_masts[match(no_, all_masts$cluster), "mast_y"]), 0, 0, no_)
   }))
   rownames(add) <- unique(all_masts$cluster[all_masts$cluster > 0])
   colnames(add) <- colnames(all_masts)
@@ -248,10 +248,10 @@ get_user_days_c <- function(user_, nt_, level_ = "CDR", fill_avg_dist = 300,
                 value.var = "id_masts",
                 fun.aggregate = paste0)[-1, ]
   days[days == ""] <- NA
-  colnames(days) <- (as.numeric(colnames(days)) + hour_shift) %% 24
+  colnames(days) <- (as.numeric(colnames(days)) * (24/nt_) + hour_shift) %% 24
   rownames(days) <- gsub("_", "-",gsub("^[^_]*_", "", rownames(days))) %>%
     as.Date() %>% strftime(format = "%j") %>% as.numeric()
-  return(list(seen_masts = all_masts, days = days), polys = cl_poly_df)
+  return(list(seen_masts = all_masts, days = days, polys = cl_poly_df))
   }
 
 

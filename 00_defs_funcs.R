@@ -551,6 +551,8 @@ mean_geom <- function(a, b) sqrt(a*b)
 day_frac <- function(t) as.numeric(difftime(t, as.Date(t), units = "days"))
 
 softmax <- function(x) exp(x)/sum(exp(x))
+
+doy_to_dow <- function(y, d) weekdays(strptime(paste(y, d), format = "%Y %j"))
   
 display_segments <- function(df, cols){
   # takes a dataframe that comes from the segments table and produces

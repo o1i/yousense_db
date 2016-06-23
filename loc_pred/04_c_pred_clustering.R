@@ -104,7 +104,7 @@ pred_cluster <- function(days_, nt_ = 24, num_clus = 5){
   
   diag(distmat) <- apply(days_, 1, FUN = function(v) sum(!is.na(v))/nt_)
   jpeg(width = 500, height = 500, quality = 100, 
-       file = paste0("figures/distmat_u", user, ".jpeg"))
+       file = paste0("figures/byuser/distmat_u", user, ".jpeg"))
   image(distmat, main = paste("User", user))
   dev.off()
   dists <- as.dist(distmat)

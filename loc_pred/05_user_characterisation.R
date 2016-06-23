@@ -12,7 +12,8 @@ get_empty_user_char <- function(){
              "sd_time_spanned",
              "avg_distance_travelled",
              "med_distance_travelled",
-             "sd_distance_travelled")
+             "sd_distance_travelled",
+             "num_days")
   mat <- matrix(NA, ncol = length(names), nrow = 0)
   colnames(mat) <- names
   as.data.frame(mat)
@@ -39,7 +40,8 @@ user_char <- function(days_, gt_, user_){
     sd_time_spanned = sd(time_spanned),
     avg_distance_travelled = mean(distance_travelled),
     med_distance_travelled = median(distance_travelled),
-    sd_distance_travelled = sd(distance_travelled)
+    sd_distance_travelled = sd(distance_travelled),
+    num_days = nrow(days_)
   )
   return(out_df)
 }

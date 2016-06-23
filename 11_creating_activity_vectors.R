@@ -141,7 +141,8 @@ display_segments(subset(daten, day == 44), cols = cols)
 
 
 plot_day <- function(day_, seen_masts_, m = NULL, label = "", noise = 20,
-                     linecol = "blue"){
+                     linecol = "blue", cols = NULL){
+  if(is.null(cols)) cols <- topo.colors(length(day_))
   if(is.null(m)) m <- leaflet()%>%addTiles()
   m1 <- !is.na(day_)
   v1 <- seen_masts_[day_[m1], c("mast_x", "mast_y")] +
@@ -151,11 +152,18 @@ plot_day <- function(day_, seen_masts_, m = NULL, label = "", noise = 20,
     spTransform(CRS("+init=epsg:4326"))
   d1l <- make_spatial_lines(v1,  CRS("+init=epsg:3301")) %>%
     spTransform(CRS("+init=epsg:4326"))
-    addCircleMarkers(m, data = d1p, color = cols[m1], fillColor = "brown",
-                     popup = paste(label, "/", as.character(day_[m1]))) %>%
-    addPolylines(data = d1l, color = linecol)
+    addCircleMarkers(m, data = d1p, color = substr(cols[m1], 1, 7),
+                     popup = paste(label, "/", as.character(day_[m1]), "/",
+                                   cols[m1]),
+                     opacity = 1, fillOpacity = 1) %>%
+    addPolylines(data = d1l, color = linecol, opacity = 1)
 }
 
+i <- 0
+i <- i + 1; plot_day(days[i, ], seen_masts, label = rownames(days)[i])
+wd <- weekdays(strptime(paste("2015", rownames(days)), format = "%Y %j"))
+cbind(days[order(wd), ], wd[order(wd)])
+cbind(days, wd)
 
 # ------------------------------------------------------------------------------
 # --- Evaluation  --------------------------------------------------------------
