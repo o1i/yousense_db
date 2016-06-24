@@ -22,29 +22,54 @@ connect(user = "burkhard",
 results <- list()
 user_chars <- get_empty_user_char()
 daily_losses <- list()
+places_info <- list()
+daily_info <- list()
 users <- sort(
   dbGetQuery(con, "select distinct uid from user_characteristics;")[, 1])
+force_fit <- T
 for(user in users){
   print(user)
-
+  
   tryCatch({
     # --- Get user days --------------------------------------------------------
-    temp <- get_user_days_c(user, nt_ = nt, level_ = "CDR", hour_shift = hour_shift)
-    seen_masts <- temp[["seen_masts"]]
-    days <- temp[["days"]]
-    clus_polys <- temp[["polys"]]
-    rm(temp)
+    filename <- paste0("results/intermediate/train_u", user, ".rda")
+    if(!file.exists(filename)){
+      temp <- get_user_days_c(user, nt_ = nt, level_ = "CDR", hour_shift = hour_shift)
+      seen_masts <- temp[["seen_masts"]]
+      days <- temp[["days"]]
+      clus_polys <- temp[["polys"]]
+      rm(temp)
+      save(seen_masts, days, clus_polys, file = filename)
+    }
+    
+    # daily_info does not change with the nt/hourshift parameters, but for 
+    #   simplicity's sake we still give the name.
+    daily_info[[as.character(user)]] <- 
+      data.frame(dow = doy_to_dow(2015,rownames(days)),
+                 no_cdr = apply(days, 1, function(v) sum(!is.na(v))))
+    save(daily_info, file = paste0("results/daily_info_", hour_shift, 
+                                   "_", nt, ".rda"))
     
     # nrow(days)
     # leaflet()%>%addTiles()%>%addPolygons(data = spTransform(clus_polys, CRS("+init=epsg:4326")))
     
     # --- Create Predictions ---------------------------------------------------
-    p_bench1 <- bench1(days)
-    p_bench2 <- bench2(days)
-    p_bench3 <- bench3(days)
-    p_cluster <- pred_cluster(days_ = days, nt_ = nt, num_clus = 5)
-    # p_cluster_v1 <- pred_cluster_v1(days_ = days)
-    p_freq <- pred_freq(days)
+    filename <- paste0("results/fits/fits_", hour_shift, "_", nt,
+                       "_", user, ".rda")
+    if(force_fit | !file.exists(filename)){
+      p_bench1 <- bench1(days)
+      p_bench2 <- bench2(days)
+      p_bench3 <- bench3(days)
+      p_cluster <- pred_cluster(days_ = days, nt_ = nt, num_clus = 5)
+      # p_cluster_v1 <- pred_cluster_v1(days_ = days)
+      p_freq <- pred_freq(days)
+      save("p_bench2", "p_bench2", "p_bench3", "p_cluster", "p_freq", 
+           file = filename)
+    }else{
+      
+      load(filename)
+    }
+    
     
     # --- Get Ground Truth data ------------------------------------------------
     gt <- get_segments_gt(user, hour_shift = hour_shift, include_moves = F)
@@ -72,59 +97,66 @@ for(user in users){
                                                    days_ = days)
                                        })
     names(eval_dist_pred_only) <- c("s_bench1", "s_bench2", "s_bench3", "s_cluster",
-                              "s_freq")
+                                    "s_freq")
     
     eval_labels <- lapply(list(p_bench1, p_bench2, p_bench3, p_cluster, 
                                p_freq), function(pred){
                                  t(eval_pred(ground_truth_ = gt_masts,
-                                           prediction_ = pred,
-                                           func = day_comp_2,
-                                           days_ = days))
+                                             prediction_ = pred,
+                                             func = day_comp_2,
+                                             days_ = days))
                                })
     names(eval_labels) <- c("s_bench1", "s_bench2", "s_bench3", "s_cluster",
-                              "s_freq")
+                            "s_freq")
     
     # print("Evaluation complete")
     
     # --- store Results --------------------------------------------------------
     # --- numbers
-    user_chars <- rbind(user_chars, user_char(days, gt, user))
-    save(user_chars, file = "results/user_chars.rda")
+    user_chars[as.character(user), ] <- user_char(days, gt, user)
+    save(user_chars, file = paste0("results/user_chars_", hour_shift, 
+                                   "_", nt, ".rda"))
     daily_losses[[as.character(user)]] <- list(dist_all = eval_dist_all,
                                                dist_pred = eval_dist_pred_only,
                                                labels = eval_labels)
-    save(daily_losses, file = "results/daily_losses.rda")
+    save(daily_losses, file = paste0("results/daily_losses_", hour_shift, 
+                                     "_", nt, ".rda"))
     
     # --- images
     x <- seq(2, 5, l = 100)
     jpeg(height = 500, width = 500, quality = 100, 
          file = paste0("figures/byuser/pred_comp_all_u", user, ".jpeg"))
-    plot(x, ecdf(eval_dist_all[["s_bench1"]])(x), type = "l", main = paste0("Comp, user ", user),
+    plot(x, ecdf(eval_dist_all[["s_bench1"]]$result)(x), type = "l", main = paste0("Comp, user ", user),
          ylab = "ecdf of days below a certain avg error",
          xlab = "log10 of distance")
-    lines(x, ecdf(eval_dist_all[["s_bench2"]])(x), col = 2)
-    lines(x, ecdf(eval_dist_all[["s_bench3"]])(x), col = 3) 
-    lines(x, ecdf(eval_dist_all[["s_cluster"]])(x), col = 4)
-    lines(x, ecdf(eval_dist_all[["s_freq"]])(x), col = 5, lty = 2)
+    lines(x, ecdf(eval_dist_all[["s_bench2"]]$result)(x), col = 2)
+    lines(x, ecdf(eval_dist_all[["s_bench3"]]$result)(x), col = 3) 
+    lines(x, ecdf(eval_dist_all[["s_cluster"]]$result)(x), col = 4)
+    lines(x, ecdf(eval_dist_all[["s_freq"]]$result)(x), col = 5, lty = 2)
     dev.off()
     
     jpeg(height = 500, width = 500, quality = 100, 
          file = paste0("figures/byuser/pred_comp_predonly_u", user, ".jpeg"))
-    plot(x, ecdf(eval_dist_pred_only[["s_bench1"]])(x), type = "l", main = paste0("Comp, user ", user),
+    plot(x, ecdf(eval_dist_pred_only[["s_bench1"]]$result)(x), type = "l", main = paste0("Comp, user ", user),
          ylab = "ecdf of days below a certain avg error",
          xlab = "log10 of distance")
-    lines(x, ecdf(eval_dist_pred_only[["s_bench2"]])(x), col = 2)
-    lines(x, ecdf(eval_dist_pred_only[["s_bench3"]])(x), col = 3) 
-    lines(x, ecdf(eval_dist_pred_only[["s_cluster"]])(x), col = 4)
-    lines(x, ecdf(eval_dist_pred_only[["s_freq"]])(x), col = 5, lty = 2)
+    lines(x, ecdf(eval_dist_pred_only[["s_bench2"]]$result)(x), col = 2)
+    lines(x, ecdf(eval_dist_pred_only[["s_bench3"]]$result)(x), col = 3) 
+    lines(x, ecdf(eval_dist_pred_only[["s_cluster"]]$result)(x), col = 4)
+    lines(x, ecdf(eval_dist_pred_only[["s_freq"]]$result)(x), col = 5, lty = 2)
     dev.off()
     
-    vis_gt(user_ = user, eps_coords = 30, minpts_coords = 4, nt_ = nt,
-           hour_shift = hour_shift)
+    places_info[[as.character(user)]] <- vis_gt(user_ = user, 
+                                                eps_coords = 30, 
+                                                minpts_coords = 4, 
+                                                nt_ = nt,
+                                                hour_shift = hour_shift)
+    save(places_info, file = paste0("results/places_info_", hour_shift, 
+                                    "_", nt, ".rda"))
     
     
     
-
+    
   },
   error = function(e){print(paste("Error at user", user, "\n", e))},
   warning = function(w){print(paste("Warning at user", user, "\n", w))}

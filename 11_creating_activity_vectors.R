@@ -138,7 +138,25 @@ display_segments(subset(daten, day == 44), cols = cols)
 # ------------------------------------------------------------------------------
 # --- Benchmark Prediction  ----------------------------------------------------
 # ------------------------------------------------------------------------------
-
+plot_gt_day <- function(df_, m = NULL){
+  if(!is.null(df_$col)){
+    col <- substr(df_[df_$stop, "col"], 1, 7)
+  }else{
+    col <- substr(heat.colors(nrow(df_)), 1, 7)
+  }
+  line <- make_spatial_lines(unname(df_[df_$stop, c("x_mean", "y_mean")]), CRS("+init=epsg:3301")) %>%
+    spTransform(CRS("+init=epsg:4326"))
+  if(is.null(m)){leaflet() %>% addTiles() -> m}
+  
+  addPolylines(m, data = line, col = "blue") %>%
+    addCircleMarkers(data = SpatialPoints(df_[df_$stop, c("x_mean", "y_mean")],
+                                          CRS("+init=epsg:3301")) %>%
+                       spTransform(CRS("+init=epsg:4326")),
+                     color = col, fillColor = c("yellow", col[-1]), opacity = 1,
+                     fillOpacity = 1, popup = df_[df_$stop, "cluster"]) 
+}
+i <- 124
+i <- i + 1; plot_gt_day(gt[[i]])
 
 plot_day <- function(day_, seen_masts_, m = NULL, label = "", noise = 20,
                      linecol = "blue", cols = NULL){
@@ -159,9 +177,12 @@ plot_day <- function(day_, seen_masts_, m = NULL, label = "", noise = 20,
     addPolylines(data = d1l, color = linecol, opacity = 1)
 }
 
-i <- 0
-i <- i + 1; plot_day(days[i, ], seen_masts, label = rownames(days)[i])
+i <- 225
 wd <- weekdays(strptime(paste("2015", rownames(days)), format = "%Y %j"))
+i <- i + 1; plot_day(days[i, ], seen_masts, label = rownames(days)[i]); wd[i]
+
+
+
 cbind(days[order(wd), ], wd[order(wd)])
 cbind(days, wd)
 

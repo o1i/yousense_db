@@ -58,10 +58,12 @@ vis_gt <- function(user_, eps_coords = 30, minpts_coords = 4, nt_ = 6,
   if(nrow(sleeping_places) > 0){
     sleeping_places$col <- 
       diverge_hsv(10)[pmin(4, 1:nrow(sleeping_places))]
+    sleeping_places$type <- "sleep"
   }else{
     sleeping_places <- data.frame("name" = character(0), 
                                   "days" = numeric(0),
-                                  "col" = character(0))
+                                  "col" = character(0),
+                                  type = character(0))
   }
   
   # --- Working places
@@ -72,10 +74,12 @@ vis_gt <- function(user_, eps_coords = 30, minpts_coords = 4, nt_ = 6,
   if(nrow(working_places) > 0){
     working_places$col <- 
       diverge_hcl(10)[pmax(7, 10:(10-nrow(working_places) + 1))]
+    working_places$type <- "work"
   }else{
-    sleeping_places <- data.frame("name" = character(0), 
+    working_places <- data.frame("name" = character(0), 
                                   "days" = numeric(0),
-                                  "col" = character(0))
+                                  "col" = character(0),
+                                 type = character(0))
   }
 
   # --- Other frequent places
@@ -86,14 +90,18 @@ vis_gt <- function(user_, eps_coords = 30, minpts_coords = 4, nt_ = 6,
   frequent_places <- frequent_places[order(frequent_places$days, decreasing = T), ]
   if(nrow(frequent_places) > 0){
     frequent_places$col <- terrain_hcl(10)[pmin(5, 1:nrow(frequent_places))]
+    frequent_places$type <- "frequent"
   }else{
-    sleeping_places <- data.frame("name" = character(0), 
+    frequent_places <- data.frame("name" = character(0), 
                                   "days" = numeric(0),
-                                  "col" = character(0))
+                                  "col" = character(0),
+                                  frequent = character(0))
   }
   
   # --- collecting everything
-  colored_places <- rbind(sleeping_places, working_places, frequent_places)
+  colored_places <- rbind(sleeping_places, 
+                          working_places, 
+                          frequent_places)
   gt_ <- lapply(gt_, function(df_){
     df_$col <- colored_places[match(get_name(df_), colored_places$name), "col"]
     df_$col[!df_$stop] <- "#666666"
@@ -156,15 +164,16 @@ vis_gt <- function(user_, eps_coords = 30, minpts_coords = 4, nt_ = 6,
            pch = (2:3)[ind_inc + 1])
     dev.off()
   }
-  
-  
-  
+  return(list(colored_places = colored_places,
+              first <- get_name(t(sapply(gt_, function(df_){
+                df_[1, c("x_mean", "y_mean")]
+                })))))
 }
 
 # library(sp)
 # library(RColorBrewer)
 # spat <- SpatialPoints(all_coords, CRS("+init=epsg:3301")) %>% spTransform(CRS("+init=epsg:4326"))
 # cols <- c("#000000FF", rainbow(length(unique(coord_clus$cluster)) - 1))
-# leaflet() %>% addTiles() %>% 
+# leaflet() %>% addTiles() %>%
 #   addCircleMarkers(data = spat, color = substr(cols[coord_clus$cluster + 1], 1, 7),
-#                    opacity = 1)
+#                    opacity = 1, popup = as.character(coord_clus$cluster))

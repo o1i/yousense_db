@@ -515,9 +515,9 @@ make_spatial_lines <- function(mat, crs = CRS("+init=epsg:4326")){
           #   lines (Line)
           list(
             Line(mat)),             # Actual Line
-          ID = "1")), 
+          ID = rownames(mat)[1])), 
       proj4string = crs),  # Only the SpatialLines has a CRS
-    data = mat                      # nrow(data)==length(SpatialLines)
+    data = mat[1, ]                      # nrow(data)==length(SpatialLines)
   )
 }
 

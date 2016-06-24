@@ -76,6 +76,7 @@ day_comp_2 <- function(doy, gt_, day_, days_){
     rownames(gt_) <- gt_$id_masts
     time_connected <- colSums(gt_[, -1]) * length(day_)
     temp <- gt_[cbind(match(day_, gt_$id_masts),1:length(day_))]
+    temp[is.na(temp)] <- 0
     
     # accuracy measures
     accuracy_pess <- sum(temp > 0) / sum(time_connected > 0)
@@ -118,7 +119,7 @@ eval_pred <- function(ground_truth_, prediction_, func, ...){
   result <- sapply(days_to_test, function(d_){
     func(doy = d_, gt_ = ground_truth_[[d_]], day_ = prediction_[d_, ], ...)
   })
-  return(result)
+  return(as.data.frame(result))
 }
 
 
