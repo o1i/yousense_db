@@ -82,13 +82,14 @@ pred_cluster_v3 <- function(days_, nt_ = 24, min_pts = 4,
  ind <- 1:nrow(frequent_days)
  for(eps_ in c(0.005, 0.01, 0.02, 0.03, 0.04, 0.05)){
    clusters <- dbscan(as.dist(dm), eps = eps_, minPts = minpts_)
+   ind_clustered <- F
    if(any(clusters$cluster > 0)){
-     temp <- clusters$cluster > 0
-     cl[ind[temp]] <- clusters$cluster[temp] + max(cl)
-     ind <- ind[!temp]
-     dm <- dm[!temp, !temp]
+     ind_clustered <- clusters$cluster > 0
+     cl[ind[ind_clustered]] <- clusters$cluster[ind_clustered] + max(cl)
+     ind <- ind[!ind_clustered]
+     dm <- dm[!ind_clustered, !ind_clustered]
    }
-   if(all(temp)) break
+   if(all(ind_clustered)) break
  }
  
  # --- Typical days

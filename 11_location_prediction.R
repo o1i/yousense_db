@@ -8,7 +8,7 @@ rm(list=ls())
 # ------------------------------------------------------------------------------
 
 nt <- 24  # Number of parts to split a day into.
-for(nt in c(12, 24, 6)){
+for(nt in c(6, 12, 24)){
 hour_shift <- 3
 library(reshape2)
 library(plyr)
