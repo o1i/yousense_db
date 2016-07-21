@@ -22,14 +22,22 @@ connect(user = "burkhard",
 #           CREATE TABLE segments(
 #           uid integer,
 #           segment integer,
-#           gps_id bigint,
-#           gps_id_end bigint,
-#           tmin timestamp with time zone,
-#           tmax timestamp with time zone,
+#           id_gps bigint,
+#           id_gps_end bigint,
+#           t_start timestamp with time zone,
+#           t_end timestamp with time zone,
 #           stop boolean,
-#           pos_start geometry(point),
-#           pos_mean geometry(point),
-#           pos_end geometry(point)
+#           x_mean numeric,
+#           y_mean numeric,
+#           x_start numeric,
+#           x_end numeric,
+#           y_start numeric,
+#           y_end numeric,
+#           valid_start boolean,
+#           valid_end boolean,
+#           geom_start geometry(point),
+#           geom_mean geometry(point),
+#           geom_end geometry(point)
 #           )
 #           ")
 
@@ -40,19 +48,25 @@ users <- sort(dbGetQuery(con, "SELECT DISTINCT uid FROM gps;")[, 1])
 for(user_ in users){
   print(paste("Processing user", which(users == user_), "of", length(users)))
   q <- paste0("
-    SELECT gps_id, t, ST_X(geom) as x, 
-    ST_Y(geom) as y FROM gps
+    SELECT id_gps, t, ST_X(geom) as x, 
+    ST_Y(geom) as y,
+    flag_problem
+    FROM gps
     WHERE uid = ", user_, " 
     ORDER BY t;")
   daten <- dbGetQuery(con, q)
   
   # --- Segmentation
-  daten_segmentiert <- naive_segmentation(daten, 
+  daten_segmentiert <- naive_segmentation(df = daten, 
                                           dt = 10, 
                                           dsp = 60, 
                                           dt_break = 3, 
                                           dt_short = 600, 
-                                          ds_short = 100)
+                                          ds_short = 300,
+                                          ds_really_short = 200,
+                                          problem = "flag_problem",
+                                          clean_no = 2,
+                                          clean_ratio = 2.5)
   
   # --- Simplification
   segmente <- cbind(uid = user_, naive_simplification(daten_segmentiert,
@@ -67,67 +81,75 @@ for(user_ in users){
   # leaflet() %>% addTiles() %>%
   #   addCircleMarkers(data = SpatialPoints(temp[, c("x_mean", "y_mean")],
   #                                         CRS("+init=epsg:4326")),
-  #                    popup = as.character(temp$gps_id))
+  #                    popup = as.character(temp$id_gps))
   # 
   # # Study a case
   # case <- 3963300
   # plusminus <- 60
-  # (temp_daten <- daten[abs(daten$gps_id - case) < plusminus, ])
+  # (temp_daten <- daten[abs(daten$id_gps - case) < plusminus, ])
   # (temp_daten_segmentiert <- daten_segmentiert[
-  #   abs(daten_segmentiert$gps_id - case) < plusminus, ])
-  # (temp_segmente <- segmente[abs(segmente$gps_id - case) < plusminus, ])
+  #   abs(daten_segmentiert$id_gps - case) < plusminus, ])
+  # (temp_segmente <- segmente[abs(segmente$id_gps - case) < plusminus, ])
   # 
   # # Display the original points
   # lines <- SpatialLines(list(Lines(list(Line(
   #   temp_daten_segmentiert[, c("x", "y")])), ID = 1)), CRS("+init=epsg:4326"))
   # leaflet() %>% addTiles() %>%
   #   addCircleMarkers(data = SpatialPoints(daten_segmentiert[
-  #     abs(daten_segmentiert$gps_id - case) < plusminus, c("x", "y")],
+  #     abs(daten_segmentiert$id_gps - case) < plusminus, c("x", "y")],
   #                                         CRS("+init=epsg:4326")),
   #                    color = c("red", "blue")[1+daten_segmentiert[
-  #                      abs(daten_segmentiert$gps_id - case) < plusminus, 
+  #                      abs(daten_segmentiert$id_gps - case) < plusminus, 
   #                      c("stop")]],
   #                    radius = 5 * (2 - daten_segmentiert[
-  #                      abs(daten_segmentiert$gps_id - case) < plusminus, 
+  #                      abs(daten_segmentiert$id_gps - case) < plusminus, 
   #                      c("stop")]),
   #                    popup = as.character(daten_segmentiert[
-  #                      abs(daten_segmentiert$gps_id - case) < plusminus,
-  #                                                           c("gps_id")])) %>%
+  #                      abs(daten_segmentiert$id_gps - case) < plusminus,
+  #                                                           c("id_gps")])) %>%
   #   addPolylines(data = lines)
   # 
   # # Display the stops only
   # lines <- SpatialLines(list(Lines(list(Line(segmente[
-  #   abs(segmente$gps_id - case) < plusminus, c("x_mean", "y_mean")])), ID = 1)),
+  #   abs(segmente$id_gps - case) < plusminus, c("x_mean", "y_mean")])), ID = 1)),
   #                       CRS("+init=epsg:4326"))
   # leaflet() %>% addTiles() %>%
   #   addCircleMarkers(data = SpatialPoints(segmente[
-  #     abs(segmente$gps_id - case) < plusminus, c("x_mean", "y_mean")],
+  #     abs(segmente$id_gps - case) < plusminus, c("x_mean", "y_mean")],
   #                                         CRS("+init=epsg:4326")),
   #                    color = c("red", "blue")[1+segmente[
-  #                      abs(segmente$gps_id - case) < plusminus, c("stop")]],
+  #                      abs(segmente$id_gps - case) < plusminus, c("stop")]],
   #                    radius = 5 * (2 - segmente[
-  #                      abs(segmente$gps_id - case) < plusminus, c("stop")]),
+  #                      abs(segmente$id_gps - case) < plusminus, c("stop")]),
   #                    popup = as.character(daten_segmentiert[
-  #                      abs(daten_segmentiert$gps_id - case) < plusminus,
-  #                                                           c("gps_id")])) %>%
+  #                      abs(daten_segmentiert$id_gps - case) < plusminus,
+  #                                                           c("id_gps")])) %>%
   #   addPolylines(data = lines)
   
   
   # --- Upload -----------------------------------------------------------------
-  segmente[, "tmin"] <- as.numeric(segmente[, "tmin"])
-  segmente[, "tmax"] <- as.numeric(segmente[, "tmax"])
+  segmente[, "t_start"] <- as.numeric(segmente[, "t_start"])
+  segmente[, "t_end"] <- as.numeric(segmente[, "t_end"])
   dbGetQuery(con, "DROP TABLE IF EXISTS temp CASCADE;")
   dbWriteTable(con, "temp", segmente)
   q <- "
   INSERT INTO segments
   SELECT 
-    uid::integer, segment::integer, gps_id::bigint, gps_id_end::bigint,
-    TO_Timestamp(tmin) as tmin, 
-    TO_Timestamp(tmax) as tmax, 
-    stop::boolean, 
-    ST_SetSRID(ST_Point(x_start, y_start), 4326)::geometry(point) as pos_start,
-    ST_SetSRID(ST_Point(x_mean, y_mean), 4326)::geometry(point) as pos_mean,
-    ST_SetSRID(ST_Point(x_end, y_end), 4326)::geometry(point) as pos_end
+    uid::integer, segment::integer, id_gps::bigint, id_gps_end::bigint,
+    TO_Timestamp(t_start) as t_start, 
+    TO_Timestamp(t_end) as t_end, 
+    stop::boolean,
+    x_mean,
+    y_mean,
+    x_start,
+    x_end,
+    y_start,
+    y_end,
+    valid_start::boolean,
+    valid_end::boolean,
+    ST_SetSRID(ST_Point(x_start, y_start), 4326)::geometry(point) as geom_start,
+    ST_SetSRID(ST_Point(x_mean, y_mean), 4326)::geometry(point) as geom_mean,
+    ST_SetSRID(ST_Point(x_end, y_end), 4326)::geometry(point) as geom_end
   FROM temp;
   "
   dbGetQuery(con, q)

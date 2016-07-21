@@ -1,5 +1,5 @@
 vis_gt <- function(user_, eps_coords = 30, minpts_coords = 4, nt_ = 6,
-                   hour_shift = 2){
+                   hour_shift = 2, save_stuff = T){
   library(dbscan)
   library(colorspace)
   gt_ <- get_segments_gt(user, hour_shift = hour_shift, include_moves = T)
@@ -59,6 +59,7 @@ vis_gt <- function(user_, eps_coords = 30, minpts_coords = 4, nt_ = 6,
     sleeping_places$col <- 
       diverge_hsv(10)[pmin(4, 1:nrow(sleeping_places))]
     sleeping_places$type <- "sleep"
+    sleeping_places[1, "type"] <- "sleep_main"
   }else{
     sleeping_places <- data.frame("name" = character(0), 
                                   "days" = numeric(0),
@@ -74,7 +75,10 @@ vis_gt <- function(user_, eps_coords = 30, minpts_coords = 4, nt_ = 6,
   if(nrow(working_places) > 0){
     working_places$col <- 
       diverge_hcl(10)[pmax(7, 10:(10-nrow(working_places) + 1))]
+    working_places <- working_places[order(working_places$days, 
+                                           decreasing = T), , drop = F]
     working_places$type <- "work"
+    working_places[1, "type"] <- "work_main"
   }else{
     working_places <- data.frame("name" = character(0), 
                                   "days" = numeric(0),
@@ -87,7 +91,8 @@ vis_gt <- function(user_, eps_coords = 30, minpts_coords = 4, nt_ = 6,
   frequent_places <- subset(frequent_places, !is.na(days) & 
                               !name %in% c(working_places$name, 
                                            sleeping_places$name))
-  frequent_places <- frequent_places[order(frequent_places$days, decreasing = T), ]
+  frequent_places <- frequent_places[order(frequent_places$days, 
+                                           decreasing = T), , drop = F]
   if(nrow(frequent_places) > 0){
     frequent_places$col <- terrain_hcl(10)[pmin(5, 1:nrow(frequent_places))]
     frequent_places$type <- "frequent"
@@ -98,14 +103,28 @@ vis_gt <- function(user_, eps_coords = 30, minpts_coords = 4, nt_ = 6,
                                   frequent = character(0))
   }
   
-  # --- collecting everything
+  # --- collecting everything and adding stuff for the gam
   colored_places <- rbind(sleeping_places, 
                           working_places, 
                           frequent_places)
+  total_time <- sum(sapply(gt_, function(df_){
+    sum(df_$f_end - df_$f_start)
+  }))
+  colored_places$perc <- colored_places$days / total_time
+  
+  frequencies <- table(do.call(what = c, sapply(gt_, function(df_){
+    get_name(df_)
+  }))) / length(gt_)
+  
   gt_ <- lapply(gt_, function(df_){
-    df_$col <- colored_places[match(get_name(df_), colored_places$name), "col"]
+    add1 <- colored_places[match(get_name(df_), colored_places$name), 
+                          c("col", "type", "perc")] 
+    freq <- as.numeric(frequencies)[match(get_name(df_), names(frequencies))]
+    df_ <- cbind(df_, add1, freq)
     df_$col[!df_$stop] <- "#666666"
     df_$col[is.na(df_$col)] <- rgb(255, 192, 0, alpha = 125, m = 256)
+    df_[!df_$stop, "type"] <- "move"
+    df_[is.na(df_$type), "type"] <- "other"
     return(df_)
   })
   
@@ -135,9 +154,9 @@ vis_gt <- function(user_, eps_coords = 30, minpts_coords = 4, nt_ = 6,
                                        format = "%Y %j")) == "Saturday")
   
   # --- Visualise --------------------------------------------------------------
-  breaks <- matrix(c(1, 90, 181, 273, 90, 181, 273, 366), ncol = 2)
+  breaks <- matrix(c(1, doy_first[c(4, 7, 10, 4, 7, 10)], 366), ncol = 2)
   for(i in 1:nrow(breaks)){
-    jpeg(height = 600, width = 900, quality = 100, 
+    if(save_stuff) jpeg(height = 600, width = 900, quality = 100, 
          file = paste0("figures/byuser/usage_vis_u", user_, "_", i, ".jpeg"))
     plot(NULL, ylim = c(1, 0), xlim = c(breaks[i, 1], breaks[i, 2]), 
          ylab = "Time of day", 
@@ -162,12 +181,78 @@ vis_gt <- function(user_, eps_coords = 30, minpts_coords = 4, nt_ = 6,
     
     points(cdr$day - 0.5, cdr$f_start, lwd = 3, col = (2:3)[ind_inc + 1],
            pch = (2:3)[ind_inc + 1])
-    dev.off()
+    if(save_stuff) dev.off()
   }
+  
+  
+  # --- Get the regression stuff -----------------------------------------------
+  get_reg <- function(df_, dow, cdr_){
+    # assumes a data frame with a single row. that contains all the goodness
+    nt2 <- 24*12
+    short <- 1/24/4
+    long <- 1/24
+    grid <- seq(0, 1, l = nt2 + 1)  # one too many for boundaries
+    segs <- grid[grid[-1]>df_$f_start & grid[-length(grid)] < df_$f_end]
+    
+    if(length(segs) == 0){
+      return(data.frame(
+        tod = numeric(0), end = logical(0), long = logical(0), 
+        stop = logical(0), type = character(0),
+        perc_tot = numeric(0), freq = numeric(0), dow = character(0), 
+        time_since_last_cdr = numeric(0), in_first_segment = logical(0), 
+        in_last_segment = logical(0),
+        any_cdr = logical(0)
+      ))
+    }
+    
+    cdr_ <- rbind( cdr_, c(0, 0, ""))
+    cdr_ <- cdr_[order(cdr_$f_start), ]
+    dur_last_cdr <- segs - as.numeric(sapply(segs, function(t_){
+      if(max(cdr_$f_start) < t_){
+        max(as.numeric(cdr_$f_start))
+      }else{
+        cdr_[which.max(cdr_$f_start > t_) - 1, "f_start"]
+      }
+    }))
+    bool_cdr_in_seg <- apply(outer(segs + 1/nt2, cdr_$f_start[-1], ">") & 
+                             outer(segs, cdr_$f_start[-1], "<="), 1, any)
+    
+    df2 <- data.frame(
+      tod = segs, 
+      beginning = seq_along(segs) <= (short * nt2),
+      end = rev(seq_along(segs)) <= (short * nt2),
+      beginning_2 = seq_along(segs) <= (long * nt2) & 
+        (length(segs)) >= (long * nt2),
+      end_2 = rev(seq_along(segs)) <= (long * nt2) & 
+        (length(segs)) >= (long * nt2),
+      long = length(segs) >= (long * nt2),
+      stop = df_$stop,
+      type = df_$type,
+      perc_tot = df_$perc,
+      freq = df_$freq,
+      dow = dow,
+      time_since_last_cdr = dur_last_cdr,
+      in_first_segment = df_$f_start == 0,
+      in_last_segment = df_$f_end == 1,
+      any_cdr = bool_cdr_in_seg
+    )
+    return(df2)
+  }
+  
+  rel_days <- intersect(cdr$day, names(gt_))
+  reg_frame <- lapply(as.list(rel_days), function(d_){
+    dow <- doy_to_dow(2015, d_)
+    cdr_ <- subset(cdr, day == d_)
+    lapply(as.list(1:nrow(gt_[[d_]])), function(row_){
+      tt <- get_reg(df_ = gt_[[d_]][row_, , drop = F], dow = dow, cdr_ = cdr_)
+    }) %>% do.call(what = rbind)
+  }) %>% do.call(what = rbind)
+  
   return(list(colored_places = colored_places,
-              first <- get_name(t(sapply(gt_, function(df_){
-                df_[1, c("x_mean", "y_mean")]
-                })))))
+              first = get_name(t(sapply(gt_, function(df_){
+                df_[1, c("x_mean", "y_mean"), drop = F]
+              }))),
+              reg_frame = reg_frame))
 }
 
 # library(sp)

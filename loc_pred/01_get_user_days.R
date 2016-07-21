@@ -84,7 +84,7 @@ return(list(seen_masts = seen_masts, days = days))
 # ------------------------------------------------------------------------------
 
 get_user_days_c <- function(user_, nt_, level_ = "CDR", fill_avg_dist = 300,
-                          hour_shift = 2, clust_eps = 0.175, 
+                          hour_shift = 3, clust_eps = 0.175, 
                           clust_minpt_frac = 0.015){
   # This function fetches the data to use by user.
   # user_  is the number of the user

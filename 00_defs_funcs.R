@@ -225,8 +225,18 @@ dbWriteSpatial <- function(con, spatial.df, schemaname="public", tablename,
 
 # --- Functions for the presentation -------------------------------------------
 
-naive_segmentation <- function(df, dt, dsp, dt_break, dt_short, ds_short,
-                               problem = ""){
+naive_segmentation <- function(df, dt, dsp, 
+                               dt_break, dt_short, 
+                               ds_short, ds_really_short, problem = "", 
+                               clean_no = 0, clean_ratio = 2, 
+                               multiple_thershold = 4,
+                               circle_diam_max = 500){
+  # clean_no  number of "outliers" to be corrected: if a two non-adjacent points
+  #           are closer together than the distance between the points and the
+  #           point(s) in between, the between point(s) will be cleaned (inter-
+  #           polated)
+  # clean_ratio: the ratio that determines when a point is treated as outlier 
+  #           and corrected
   # df        data frame with (ordered) points. contains t, x and y
   # dt        time threshold for first segmentation
   # dsp       spatial threshold for first segmentation
@@ -251,6 +261,44 @@ naive_segmentation <- function(df, dt, dsp, dt_break, dt_short, ds_short,
     df$valid <- valid
     df$valid_previous <- c(T, valid[-nrow(df)])
   }
+  
+  # --- Step 0: Clean raw trajectories
+  df$flag_cleaned <- F
+  if(clean_no > 0){
+    pmean <- function(v1, v2){
+      apply(cbind(v1, v2), 1, mean)
+    }
+    ind_change <- logical(nrow(df))
+    neighbour_dists <- list()
+    for(i in 0:clean_no){
+      neighbour_dists[[i + 1]] <- distHaversine(df[-c(1:(i+1)), c("x", "y")], 
+                                            df[-c((nrow(df) - i):nrow(df)), 
+                                               c("x", "y")])
+      if(i>0){
+        add_inds <- which(pmean(neighbour_dists[[1]][-(1:i)], 
+                                rev(rev(neighbour_dists[[1]])[-(1:i)])) / 
+                            neighbour_dists[[i + 1]]
+                             > clean_ratio)
+        add_inds <- sort(unique(as.numeric(outer(add_inds, 0:(i+1), "+"))))
+        ind_change[add_inds] <- T
+      }
+    }
+    t_start <- which(ind_change & c(T, !ind_change[-length(ind_change)]))
+    t_stop <- which(ind_change & c(!ind_change[-1], T))
+      cleaning_interpol <- function(ind_, no_){
+        # Interpolates between ind_ and ind_+no_+1
+        df[(ind_ + 1):(ind_ + no_), c("x", "y")] <<- 
+          df[ind_,           c("x", "y")] * (1:no_) / (no_ + 1) + 
+          df[ind_ + no_ + 1, c("x", "y")] * (no_:1) / (no_ + 1) 
+        df[(ind_ + 1):(ind_ + no_), "flag_cleaned"] <<- T
+        return(NULL)
+      }
+      sapply(1:length(t_start), function(i_){
+        cleaning_interpol(t_start[i_], t_stop[i_] - t_start[i_] - 1)
+      })
+      rm(neighbour_dists, ind_change, t_start, t_stop)
+  }
+  
   
   # --- Step 1: detect stops using thresholds 
   df <- df[order(df$t), ]
@@ -327,6 +375,17 @@ naive_segmentation <- function(df, dt, dsp, dt_break, dt_short, ds_short,
   temp <- ddply(df, .variables = c("segment", "stop"), .fun = function(df_){
     df_ <- df_[order(df_$t), ]
     n <- nrow(df_)
+    if(n>1){
+      travel_dist <- distHaversine(df_[n, c("x", "y")],
+                                   df_[1, c("x", "y")])
+      tot_dist <- sum(distHaversine(df_[-1, c("x", "y")],
+                                    df_[-n, c("x", "y")]))
+      max_dist <- max(distHaversine(df_[1, c("x", "y")],
+                                    df_[-1, c("x", "y")]))
+    }else{
+      travel_dist <- tot_dist <- max_dist <- 0 
+    }
+ 
     return(data.frame(segment = df_[1, "segment"],
                       stop = df_[1, "stop"],
                       t_beg = df_[1, "t"],
@@ -337,16 +396,26 @@ naive_segmentation <- function(df, dt, dsp, dt_break, dt_short, ds_short,
                       y_end = df_[n, "y"],
                       id_gps = df_[1, "id_gps"],
                       valid_back = df_[1, "valid_previous"],
-                      valid_forward = df_[n, "valid"]))
+                      valid_forward = df_[n, "valid"],
+                      tot_dist = tot_dist,
+                      travel_dist = travel_dist,
+                      max_dist = max_dist,
+                      tot_t = as.numeric(difftime(df_[n, "t"], df_[1, "t"], 
+                                                  units = "mins")),
+                      unary = (n == 1)))
   })
   
-  sandwich <- !temp$stop & c(F, temp$stop[-nrow(temp)]) & c(temp$stop[-1], F) &
-    difftime(c(temp$t_beg[-1], temp$t_beg[nrow(temp)]),
-             c(temp$t_end[1], temp$t_end[-nrow(temp)]), 
-             units = "secs") < dt_short & 
-    distHaversine(temp[c(2:nrow(temp), nrow(temp)), c("x_beg", "y_beg")], 
-                  temp[c(1, 1:(nrow(temp) - 1)), c("x_end", "y_end")]) < 
-    ds_short & temp$valid_back & temp$valid_forward
+  sandwich <- !temp$stop & 
+    # Moves that (validly) border a stop
+    (c(T, temp$stop[-nrow(temp)]) & temp$valid_back |
+       c(temp$stop[-1], T)  & temp$valid_forward
+     ) &
+    # and are either short or very curved and dont stray too far
+    (temp$tot_t < dt_short & temp$travel_dist < ds_short | 
+       temp$travel_dist < ds_really_short |
+       temp$tot_dist / temp$travel_dist > multiple_thershold & 
+       temp$max_dist < circle_diam_max) | 
+     temp$unary
   
   
   df[df$segment %in% temp[sandwich, "segment"], "stop"] <- T
@@ -356,13 +425,14 @@ naive_segmentation <- function(df, dt, dsp, dt_break, dt_short, ds_short,
     cumsum(c(0, !valid[-nrow(df)]))
   
   # --- Step 3: Split segments with long breaks in them
-  for(i_ in 1:(nrow(df)-1)){
-    if(as.numeric(abs(difftime(df$t[i_], 
-                               df$t[i_ + 1], units = "mins"))) > dt_break & 
-       df$segment[i_] == df$segment[i_ + 1]){
-      df$segment[(i_ + 1):nrow(df)] <- df$segment[(i_+1):nrow(df)] + 1
-    }
-  }
+  # 2016-07-06 why did i introduce this? does not seem to make sense
+  # for(i_ in 1:(nrow(df)-1)){
+  #   if(as.numeric(abs(difftime(df$t[i_], 
+  #                              df$t[i_ + 1], units = "mins"))) > dt_break & 
+  #      df$segment[i_] == df$segment[i_ + 1]){
+  #     df$segment[(i_ + 1):nrow(df)] <- df$segment[(i_+1):nrow(df)] + 1
+  #   }
+  # }
   
   return(df)
 }
@@ -538,9 +608,12 @@ make_spatial_segments <- function(mat, crs = CRS("+init=epsg:4326")){
 
 sigmoid <- function(t) 1/(1+exp(-t))
 
-Mode <- function(x) {
+Mode <- function(x, minPts_ = 0) {
+  if(all(is.na(x))) return(NA)
   ux <- unique(x[!is.na(x)])
-  ux[which.max(tabulate(match(x, ux)))]
+  mode <- ux[which.max(tabulate(match(x, ux)))]
+  if(mode >= minPts_) return(mode)
+  return(NA)
 }
 
 tricube <- function(x) 70/81*pmax(0, 1 - abs(x)^3)^(1/3)

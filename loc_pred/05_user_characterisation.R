@@ -13,7 +13,10 @@ get_empty_user_char <- function(){
              "avg_distance_travelled",
              "med_distance_travelled",
              "sd_distance_travelled",
-             "num_days")
+             "num_days",
+             "num_days_3cdr",
+             "num_days_4cdr",
+             "num_days_5cdr")
   mat <- matrix(NA, ncol = length(names), nrow = 0)
   colnames(mat) <- names
   as.data.frame(mat)
@@ -25,6 +28,7 @@ user_char <- function(days_, gt_, user_){
   cdr_per_day <- apply(days_, 1, function(v)sum(!is.na(v)))
   time_spanned <- apply(days_, 1, function(v) max(which(!is.na(v)))-min(which(!is.na(v))))
   distance_travelled <- sapply(gt_, function(df_) sum(sqrt(diff(df_[df_$stop, "x_mean"])^2 + diff(df_[df_$stop, "y_mean"])^2)))
+  daily_cdr <- apply(as.matrix(days_), 1, function(v) sum(!is.na(v)))
   
   out_df <- data.frame(
     uid = user_,
@@ -41,7 +45,10 @@ user_char <- function(days_, gt_, user_){
     avg_distance_travelled = mean(distance_travelled),
     med_distance_travelled = median(distance_travelled),
     sd_distance_travelled = sd(distance_travelled),
-    num_days = nrow(days_)
+    num_days = nrow(days_),
+    num_days_3cdr = sum(daily_cdr >=3),
+    num_days_4cdr = sum(daily_cdr >=4),
+    num_days_5cdr = sum(daily_cdr >=5)
   )
   return(out_df)
 }
