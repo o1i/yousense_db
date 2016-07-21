@@ -612,7 +612,7 @@ Mode <- function(x, minPts_ = 0) {
   if(all(is.na(x))) return(NA)
   ux <- unique(x[!is.na(x)])
   mode <- ux[which.max(tabulate(match(x, ux)))]
-  if(mode >= minPts_) return(mode)
+  if(max(tabulate(match(x, ux))) >= minPts_) return(mode)
   return(NA)
 }
 

@@ -93,8 +93,8 @@ pred_cluster_v3 <- function(days_, nt_ = 24, min_pts = 4,
  }
  
  # --- Typical days
- typical_days <- apply(sapply(sort(unique(clusters$cluster)), function(cl_){
-   apply(frequent_days[clusters$cluster == cl_, ], 2, Mode, minPts_ = 2)
+ typical_days <- apply(sapply(sort(unique(cl)), function(cl_){
+   apply(frequent_days[cl == cl_, ], 2, Mode, minPts_ = 2)
  }), 2, fill_vector)
  typical_days
  
