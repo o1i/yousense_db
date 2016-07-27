@@ -659,6 +659,7 @@ display_segments <- function(df, cols){
 
 fill_vector <- function(v){
   # Fills the NA-holes in a vector with "neighbouring" non-NA information
+  if(all(is.na(v))) return(v)
   if(is.na(v[1])) v[1:which.max(!is.na(v))] <- v[which.max(!is.na(v))]
   w <- rev(v)
   if(is.na(w[1])) w[1:which.max(!is.na(w))] <- w[which.max(!is.na(w))]

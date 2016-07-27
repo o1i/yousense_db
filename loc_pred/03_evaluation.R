@@ -161,6 +161,7 @@ day_comp_handover <- function(gt_, names = c("x_mean", "y_mean",
                       handover_log_avg = sum(log10(dists) * weights) / 
                         sum(weights)))
   }) %>% do.call(what = rbind)
+  test$day <- names(gt_)
   return(test)
 }
 

@@ -37,13 +37,13 @@ initialise <- function(obj_name, filename, init){
 user_chars <- initialise("user_chars", paste0("results/user_chars_", 
                                               hour_shift, "_", nt, 
                                 ".rda"), get_empty_user_char())
-all_eval <-  initialise("all_eval", paste0("results/all_eval_", 
+all_evals <-  initialise("all_evals", paste0("results/all_evals_", 
                                            hour_shift, "_", nt, 
                                 ".rda"), list())
 places_info <-  initialise("places_info", paste0("results/places_info_", 
                                                  hour_shift, "_", nt, 
                                   ".rda"), list())
-daily_info <- initialise("daily_info", paste0("results/daily_info_", 
+daily_infos <- initialise("daily_infos", paste0("results/daily_infos_", 
                                               hour_shift, "_", nt, 
                                 ".rda"), list())
 
@@ -58,7 +58,7 @@ for(user in users){
            error = function(e){},
            warning = function(w){}
   )
-  cat(paste("User", user, ": "))
+  cat(paste("User", user, ": ", Sys.time(), " "))
   
   cat(paste(round(system.time(tryCatch({
     # --------------------------------------------------------------------------
@@ -85,6 +85,7 @@ for(user in users){
     # --------------------------------------------------------------------------
     # --- Create Predictions 
     # --------------------------------------------------------------------------
+    days <- days[which.max(as.numeric(rownames(days)) < 300):nrow(days), ]
     filename <- paste0("results/fits/fits_", hour_shift, "_", nt,
                        "_", user, ".rda")
     if(force_fit | !file.exists(filename)){
@@ -112,15 +113,15 @@ for(user in users){
     }else{
       load(filename)
       p_freq_h <- pred_freq_hierarchical(days)
-      p_cluster2 <- pred_cluster_v3(days_ = days, 
-                                    nt_ = nt, 
-                                    min_pts = 4, 
-                                    seen_masts_ = seen_masts, 
-                                    scale_ = 1, 
-                                    pen_ = 0.5, 
+      p_cluster2 <- pred_cluster_v3(days_ = days,
+                                    nt_ = nt,
+                                    min_pts = 4,
+                                    seen_masts_ = seen_masts,
+                                    scale_ = 1,
+                                    pen_ = 0.5,
                                     thresh_ = 0.5,
-                                    save_stuff = save_stuff, 
-                                    eps_ = 0.05, 
+                                    save_stuff = save_stuff,
+                                    eps_ = 0.05,
                                     minpts_ = 5)
       save("p_bench1", "p_bench2", "p_bench3", "p_bench4",
                            "p_cluster",
@@ -197,8 +198,9 @@ for(user in users){
     # --------------------------------------------------------------------------
     # --- store Results
     # --------------------------------------------------------------------------
-    daily_info[[as.character(user)]] <- daily_info
-    if(save_stuff) save(daily_info, file = paste0("results/daily_info_", 
+    # file should be called daily_infos_... change next time.
+    daily_infos[[as.character(user)]] <- daily_info
+    if(save_stuff) save(daily_infos, file = paste0("results/daily_infos_", 
                                                   hour_shift,
                                                   "_", nt, ".rda"))
     # --- numbers
@@ -206,9 +208,9 @@ for(user in users){
     if(save_stuff) save(user_chars, file = paste0("results/user_chars_", 
                                                   hour_shift,
                                                   "_", nt, ".rda"))
-    all_eval[[as.character(user)]] <- all_eval
-    if(save_stuff) save(all_eval, 
-                        file = paste0("results/all_eval_", 
+    all_evals[[as.character(user)]] <- all_eval
+    if(save_stuff) save(all_evals, 
+                        file = paste0("results/all_evals_", 
                                       hour_shift, "_", nt, ".rda"))
     
     # --------------------------------------------------------------------------
@@ -227,7 +229,7 @@ for(user in users){
          xlab = "log10 of distance")
     lines(x, ecdf(all_eval[["s_bench2"]]$avg_logdist)(x), col = 1, lty = 2)
     lines(x, ecdf(all_eval[["s_bench3"]]$avg_logdist)(x), col = 1, lty = 3) 
-    lines(x, ecdf(all_eval[["s_bench3"]]$avg_logdist)(x), col = 2, lty = 1)
+    lines(x, ecdf(all_eval[["s_bench1"]]$avg_logdist)(x), col = 2, lty = 1)
     lines(x, ecdf(all_eval[["s_cluster"]]$avg_logdist)(x), col = 4)
     lines(x, ecdf(all_eval[["s_cluster2"]]$avg_logdist)(x), col = 3, lty = 1, lwd = 2)
     lines(x, ecdf(all_eval[["s_freq"]]$avg_logdist)(x), col = 3, lty = 2, lwd = 2)
@@ -247,7 +249,7 @@ for(user in users){
          xlab = "log10 of distance")
     lines(x, ecdf(all_eval[["s_bench2"]]$avg_logdist_pred_only)(x), col = 1, lty = 2)
     lines(x, ecdf(all_eval[["s_bench3"]]$avg_logdist_pred_only)(x), col = 1, lty = 3) 
-    lines(x, ecdf(all_eval[["s_bench3"]]$avg_logdist_pred_only)(x), col = 2, lty = 1)
+    lines(x, ecdf(all_eval[["s_bench1"]]$avg_logdist_pred_only)(x), col = 2, lty = 1)
     lines(x, ecdf(all_eval[["s_cluster"]]$avg_logdist_pred_only)(x), col = 4)
     lines(x, ecdf(all_eval[["s_cluster2"]]$avg_logdist_pred_only)(x), col = 3, lty = 1, lwd = 2)
     lines(x, ecdf(all_eval[["s_freq"]]$avg_logdist_pred_only)(x), col = 3, lty = 2, lwd = 2)
@@ -270,7 +272,7 @@ for(user in users){
          log = "x")
     lines(x2, ecdf(all_eval[["s_bench2"]]$avg_dist)(x2), col = 1, lty = 2)
     lines(x2, ecdf(all_eval[["s_bench3"]]$avg_dist)(x2), col = 1, lty = 3) 
-    lines(x2, ecdf(all_eval[["s_bench3"]]$avg_dist)(x2), col = 2, lty = 1)
+    lines(x2, ecdf(all_eval[["s_bench1"]]$avg_dist)(x2), col = 2, lty = 1)
     lines(x2, ecdf(all_eval[["s_cluster"]]$avg_dist)(x2), col = 4)
     lines(x2, ecdf(all_eval[["s_cluster2"]]$avg_dist)(x2), col = 3, lty = 1, lwd = 2)
     lines(x2, ecdf(all_eval[["s_freq"]]$avg_dist)(x2), col = 3, lty = 2, lwd = 2)
@@ -291,7 +293,7 @@ for(user in users){
          log = "x")
     lines(x2, ecdf(all_eval[["s_bench2"]]$avg_dist_pred_only)(x2), col = 1, lty = 2)
     lines(x2, ecdf(all_eval[["s_bench3"]]$avg_dist_pred_only)(x2), col = 1, lty = 3) 
-    lines(x2, ecdf(all_eval[["s_bench3"]]$avg_dist_pred_only)(x2), col = 2, lty = 1)
+    lines(x2, ecdf(all_eval[["s_bench1"]]$avg_dist_pred_only)(x2), col = 2, lty = 1)
     lines(x2, ecdf(all_eval[["s_cluster"]]$avg_dist_pred_only)(x2), col = 4)
     lines(x2, ecdf(all_eval[["s_cluster2"]]$avg_dist_pred_only)(x2), col = 3, lty = 1, lwd = 2)
     lines(x2, ecdf(all_eval[["s_freq"]]$avg_dist_pred_only)(x2), col = 3, lty = 2, lwd = 2)
@@ -313,7 +315,8 @@ for(user in users){
   },
   error = function(e){print(paste("Error at user", user, "\n", e))},
   warning = function(w){print(paste("Warning at user", user, "\n", w))}
-  ))[3]), "\n"))
+  ))[3]), " ", Sys.time(), "\n"))
 }  # User loop
+rm(user_chars, all_evals, places_info, daily_infos)
 }  # nt loop
 

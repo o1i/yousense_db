@@ -27,7 +27,7 @@ plot_masts(unique(days_used), cols, 0)
 # ------------------------------------------------------------------------------
 
 
-user <- 174
+user <- 178
 
 # CDR: soure = all_cdr + masts
 
@@ -131,9 +131,15 @@ compare_days(3, 3, days__ = temp, noise = 20, cols, seen_masts_)
 # --- GPS  ---------------------------------------------------------------------
 # ------------------------------------------------------------------------------
 # GPS: source GPS_GSM
-q <- paste0("SELECT * FROM segments WHERE uid = ", user, " ORDER BY t_start;")
+hour_shift <- 3
+q <- paste0("SELECT *, 
+            extract(DOY FROM t_start at time zone 'Europe/Tallinn' - INTERVAL '", 
+            hour_shift, " hours')::smallint as day,
+            extract(DOY FROM t_end at time zone 'Europe/Tallinn' - INTERVAL '", 
+            hour_shift, " hours')::smallint AS  day_next
+            FROM segments WHERE uid = ", user, " ORDER BY t_start;")
 daten <- dbGetQuery(con, q)
-display_segments(subset(daten, day == 44), cols = cols)
+display_segments(subset(daten, day == 42), cols = cols)
 
 # ------------------------------------------------------------------------------
 # --- Benchmark Prediction  ----------------------------------------------------
