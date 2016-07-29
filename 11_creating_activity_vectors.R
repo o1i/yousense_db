@@ -14,10 +14,12 @@ plot_masts <- function(mastnames_, cols_, noise_ = 0){
                                                   sd = noise_), ncol = 2)),
                      CRS("+init=epsg:3301")) %>%spTransform(CRS("+init=epsg:4326"))
   leaflet() %>% addTiles() %>% addCircleMarkers(data = p,
-                                                color = cols_)
+                                                color = cols_,
+                                                popup = as.character(mastnames_))
 }
 plot_masts(unique(days_used), cols, 0)
-
+plot_masts(as.character(seen_masts$id_masts), 
+           cols[seen_masts$cluster+1], 0)
 
 
 
@@ -27,7 +29,7 @@ plot_masts(unique(days_used), cols, 0)
 # ------------------------------------------------------------------------------
 
 
-user <- 178
+user <- 116
 
 # CDR: soure = all_cdr + masts
 
@@ -139,7 +141,7 @@ q <- paste0("SELECT *,
             hour_shift, " hours')::smallint AS  day_next
             FROM segments WHERE uid = ", user, " ORDER BY t_start;")
 daten <- dbGetQuery(con, q)
-display_segments(subset(daten, day == 42), cols = cols)
+display_segments(subset(daten, day == 209), cols = cols)
 
 # ------------------------------------------------------------------------------
 # --- Benchmark Prediction  ----------------------------------------------------

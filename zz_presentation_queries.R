@@ -175,7 +175,7 @@ intervals <- diff(as.numeric(phone_usage$t))[diff(as.numeric(
   phone_usage$uid)) == 0]
 plot(density(log(intervals + 1)), xaxt = 'n', ylab = "Time",
      main = "Density of intervals between CDR events",
-     xlab = "Time")
+     xlab = "Time (log scale)")
 axis(1, at = log(c(61, 3601, 3600*24+1)),
      labels = c("1 Minute", "1 hour", "1 day"))
 
