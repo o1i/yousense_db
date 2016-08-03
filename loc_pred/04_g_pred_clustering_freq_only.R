@@ -101,9 +101,6 @@ pred_cluster_v3 <- function(days_, nt_ = 24, min_pts = 4,
    typical_days <- apply(sapply(sort(unique(cl)), function(cl_){
      apply(as.matrix(frequent_days)[cl == cl_, ,drop = F], 2, Mode, minPts_ = 2)
    }), 2, fill_vector)
-   typical_days
-
- 
  
  # --- Match days to clusters
  dists_to_cluster <- num_mismatch <- matrix(NA, nrow = nrow(days_), 
