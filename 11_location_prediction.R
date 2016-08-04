@@ -18,11 +18,7 @@ library(leaflet)
 library(parallel)
 library(dbscan)
 
-connect(user = "burkhard", 
-        pw = scan("nosafe.txt", what = "character"), 
-        dbname = "burkhard",
-        host = "localhost", 
-        port = 5432)
+connect(pw = scan("nosafe.txt", what = "character"))
 
 initialise <- function(obj_name, filename, init){
   if(file.exists(filename)){
@@ -223,8 +219,8 @@ for(user in users){
     cols <- c("#a6cee3", "#1f78b4", "#b2df8a", "#33a02c")
     
     if(save_stuff) jpeg(height = 500, width = 500, quality = 100, 
-         file = paste0("figures/byuser/pred_comp_all","_u", user, 
-                       "_h", hour_shift, "_nt", nt, ".jpeg"))
+         file = paste0("figures/byuser/pred","_u", user, 
+                       "_h", hour_shift, "_nt", nt, "_comp_all.jpeg"))
     plot(x, ecdf(all_eval[["s_bench1b"]]$avg_logdist)(x), 
          type = "l", lty = 1, col = cols[1], lwd = 2,
          xlim = c(2, 3.5),
@@ -245,8 +241,8 @@ for(user in users){
     if(save_stuff) dev.off()
     
     if(save_stuff) jpeg(height = 500, width = 500, quality = 100, 
-         file = paste0("figures/byuser/pred_comp_predonly","_u", user, 
-                       "_h", hour_shift, "_nt", nt, ".jpeg"))
+         file = paste0("figures/byuser/pred","_u", user, 
+                       "_h", hour_shift, "_nt", nt, "_comp_predonly.jpeg"))
     plot(x, ecdf(all_eval[["s_bench1b"]]$avg_logdist_pred_only)(x), 
          type = "l", lty = 1, col = cols[1], lwd = 2,
          xlim = c(2, 3.5),
@@ -269,9 +265,11 @@ for(user in users){
     
     # --- Postlog Pictures
     
-    if(save_stuff) jpeg(height = 500, width = 500, quality = 100, 
-                        file = paste0("figures/byuser/pred_comp_all_postlog","_u", user, 
-                                      "_h", hour_shift, "_nt", nt, ".jpeg"))
+    if(save_stuff) {
+      jpeg(height = 500, width = 500, quality = 100, 
+           file = paste0("figures/byuser/pred","_u", user, 
+                         "_h", hour_shift, "_nt", nt, "_comp_all_postlog.jpeg"))
+    }
     plot(x2, ecdf(all_eval[["s_bench1b"]]$avg_dist)(x2), 
          type = "l", lty = 1, col = cols[1], lwd = 2,
          xlim = c(10^2, 10^3.5),
@@ -292,9 +290,12 @@ for(user in users){
                       "Association Mining", "DAMOCLES", "Handover Benchmark"))
     if(save_stuff) dev.off()
     
-    if(save_stuff) jpeg(height = 500, width = 500, quality = 100, 
-                        file = paste0("figures/byuser/pred_comp_predonly_postlog","_u", user, 
-                                      "_h", hour_shift, "_nt", nt, ".jpeg"))
+    if(save_stuff) {
+      jpeg(height = 500, width = 500, quality = 100, 
+           file = paste0("figures/byuser/pred","_u", user, 
+                         "_h", hour_shift, "_nt", nt, 
+                         "_comp_predonly_postlog.jpeg"))
+    }
     plot(x2, ecdf(all_eval[["s_bench1b"]]$avg_dist_pred_only)(x2), 
          type = "l", lty = 1, col = cols[1], lwd = 2,
          xlim = c(10^2, 10^3.5),
