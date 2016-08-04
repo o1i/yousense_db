@@ -173,11 +173,14 @@ write.table(phone_usage, file = "phone_usage.csv", row.names = F,
 phone_usage <- 
 intervals <- diff(as.numeric(phone_usage$t))[diff(as.numeric(
   phone_usage$uid)) == 0]
-plot(density(log(intervals + 1)), xaxt = 'n', ylab = "Time",
+jpeg("figures/inter_cdr_time_density.jpeg", quality = 100, height = 300, 
+     width = 600)
+plot(density(log(intervals + 1)), xaxt = 'n', ylab = "Density",
      main = "Density of intervals between CDR events",
      xlab = "Time (log scale)")
 axis(1, at = log(c(61, 3601, 3600*24+1)),
      labels = c("1 Minute", "1 hour", "1 day"))
+dev.off()
 
 # --- summary of phone usage per person
 q <- paste0("select uid, min(t) as mint, max(t) as maxt, count(*) as anz
@@ -197,13 +200,19 @@ phone_usage_by_person$days <-  as.numeric(difftime(phone_usage_by_person$maxt,
                                                    phone_usage_by_person$mint, units = "days"))
 phone_usage_by_person$dens <- phone_usage_by_person$anz / 
   as.numeric(difftime(phone_usage_by_person$maxt, phone_usage_by_person$mint, units = "days"))
+jpeg("figures/avg_cdr_per_day_by_user.jpeg", 
+     quality = 100, height = 300, width = 600)
 plot(density(phone_usage_by_person$dens), xlab = "CDR per day",
-     main = "Number of daily CDR events by user")
+     main = "Number of daily CDR events by user", lwd = 2)
 rug(phone_usage_by_person$dens)
+dev.off()
 
+jpeg("figures/days_of_observation_by_user.jpeg",
+     quality = 100, height = 300, width = 600)
 plot(density(phone_usage_by_person$days), xlab = "Days",
-     main = "Total number of days under observation")
+     main = "Total number of days under observation", lwd = 2)
 rug(phone_usage_by_person$days)
+dev.off()
 
 # --- Pauses: simple
 q <- "select uid, count(*) as anz from user_prefs_pause group by uid;"
@@ -229,11 +238,46 @@ colnames(corr_term) <- c("days", "userdays")
 frequencies <- merge(frequencies, corr_term, by.x = "Group.1", 
                      by.y = "days", all.x = T)
 frequencies$prob <- frequencies$x / frequencies$userdays
-plot(frequencies$Group.1, frequencies$prob, type = "b", 
-     xlab = "# of days running", ylab = "Probability of pause",
-     main = "Pausing probabilities")
-lines(smooth.spline(frequencies$Group.1, frequencies$prob), lwd = 2, col = 4)
 
+jpeg("figures/prob_of_pause.jpeg", quality = 100, height = 400, width = 600)
+par(mar = c(5.1, 4.1, 4.1, 4.1))
+plot(frequencies$Group.1, frequencies$prob, type = "p", 
+     xlab = "Days after start of recording", ylab = "Probability of pause",
+     main = "Pausing probabilities", col = gray(0.6), lwd = 2,
+     yaxt = 'n')
+ax <- seq(0, 0.4, by = 0.1)
+axis(4, at = ax, 
+     labels = round(ax / 0.4 * 127),
+     col = "#fdae61", lwd = 2)
+lines(frequencies$Group.1, frequencies$userdays / 127 * 0.4, 
+      lwd = 2, col = "#fdae61")
+axis(2, at = ax, col = "#2c7bb6", lwd = 2)
+lines(smooth.spline(frequencies$Group.1, frequencies$prob), 
+      lwd = 3, col = "#2c7bb6")
+mtext("# User days of observation", side=4, line=2)
+dev.off()
+
+# --- Mast pictures ------------------------------------------------------------
+q <- "select net, radio, neighbour_avg_dist as dist from masts
+where neighbour_avg_dist is not null and mcc = 248"
+info_masts <- dbGetQuery(con, q)
+nets <- unique(info_masts$net)
+radios <- unique(info_masts$radio)
+
+cols <- c("#66c2a5", "#fc8d62", "#8da0cb")
+
+jpeg("figures/mast_densities.jpeg", quality = 100, height = 300, width = 600)
+plot(NULL, xlim = c(1.5, 4.5), ylim = c(0, 1),
+     xlab = "Avg Distance to Voronoi-Neighbour", ylab = "Density")
+for(i_ in seq(along = nets)){
+  for(j_ in seq(along=radios)){
+    lines(density(log10(subset(info_masts, net == nets[i_] & radio == radios[j_])$dist)),
+          lty = i_, col = cols[j_], lwd = 2)
+  }
+}
+legend("topleft", lwd = 2, col = cols, legend = radios)
+legend("topright", lwd = 2, lty = 1:3, legend = paste("Provider", nets))
+dev.off()
   
 # --- Toy example for vector clustering
 # n <- 200

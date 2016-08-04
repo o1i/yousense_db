@@ -105,6 +105,7 @@ for(user in users){
     one_day$t_end_w <- time_gaps[-1]
     return(one_day)
   }, simplify = F)
+  names(cdr_list) <- sort(unique(cdrs$day))
   summary_stats_cdr[[as.character(user)]] <- 
     data.frame(
       rog_cdr_e = sapply(cdr_list, get_rog, "mast_x", "mast_y", "t_start_e", 
@@ -134,6 +135,7 @@ for(user in users){
   error = function(e){print(paste("Error at user", user, "\n", e))},
   warning = function(w){print(paste("Warning at user", user, "\n", w))})
 }  # End user loop
+save(summary_stats, file = "results/summary_stats.rda")
 
 # ------------------------------------------------------------------------------
 # --- Visualisation
@@ -153,11 +155,11 @@ n2 <- c("dist_gps", "dist_gsm", "dist_gps_stop", "dist_cdr")
 everything <- subset(do.call(what = rbind, summary_stats), rog_gps_stop_e > 1)
 apply(everything[, c(n1, n2)], 2, mean) / 10^4
 
-# used_data <- log10(as.matrix(summary_stats[[ex_user]]))
-used_data_p <- log10(as.matrix(everything[sample(nrow(everything), 600, 
+# used_data_p <- log10(as.matrix(summary_stats[[ex_user]]))
+used_data_p <- log10(as.matrix(everything[sample(nrow(everything), 600,
                                                replace = F), ]))
 used_data <- matrix(pmax(0, used_data_p), nrow = nrow(used_data_p)) %>%
-  apply(2, myjitter, fraction = 0.15)
+  apply(2, myjitter, fraction = 0.150)
 colnames(used_data) <- colnames(used_data_p)
 used_data[, c("timespans_w", "no_calls")] <- 10^used_data_p[, c("timespans_w", "no_calls")]
 
@@ -198,4 +200,73 @@ pairs(used_data[, n2], lower.panel = lower_part, c1 = c1,
       main = "Pairs Plot of Different Measures of Travelled Distance")
 if(save_imgs) dev.off()
 
+# --- Similarity by call frequency ---------------------------------------------
+library(mgcv)
+qual_df <- data.frame(quot = log10(everything$rog_cdr_e / everything$rog_gsm),
+                      avg_time = 1/everything$no_calls,
+                      act_time = everything$timespans_w,
+                      quot_dist_gsm = log10(everything$dist_cdr / 
+                                          everything$dist_gsm),
+                      quot_dist_gps = log10(everything$dist_gps / 
+                                              everything$dist_gsm))
+qual_df <- subset(qual_df, !is.na(quot) & everything$rog_cdr_e > 1 & 
+                    everything$rog_gsm > 1)
 
+
+cols <- c("#d7191c",
+  "#fdae61",
+  "#abd9e9",
+  "#2c7bb6")
+
+jpeg("figures/rog_quality.jpeg", quality = 100, height = 400, width = 600)
+plot(NULL, xlim = c(0, 0.6), ylim = c(-2, 2),
+     yaxt = 'n',
+     xlab = "Average fraction of day covered by a CDR",
+     ylab = "Quotient of RoGs (log scale)",
+     main = "Deterioration of RoG estimation with decreasing number of CDR")
+points(qual_df$act_time, qual_df$quot, cex = 0.2, col = cols[3])
+points(qual_df$avg_time, qual_df$quot, cex = 0.2, col = cols[2])
+axis(2, at = -5:5, labels = 10^(-5:5))
+abline(h = 0, lty = 2, col = gray(0.3))
+
+lines(smooth.spline(qual_df$act_time, qual_df$quot), lwd = 2, col = cols[4])
+lines(smooth.spline(qual_df$avg_time, qual_df$quot), lwd = 2, col = cols[1])
+legend("topright", lwd = 2, col = cols[c(1, 4)], 
+       legend = c("Uniformely distributed", "Actual"))
+dev.off()
+
+jpeg("figures/dist_quality_gsm.jpeg", quality = 100, height = 400, width = 600)
+plot(NULL, xlim = c(0, 0.6), ylim = c(-5, 5),
+     yaxt = 'n',
+     xlab = "Average fraction of day covered by a CDR",
+     ylab = "Quotient of Distances (log scale)",
+     main = "Deterioration of distances estimation with 
+decreasing number of CDR (GSM)")
+points(qual_df$act_time, qual_df$quot_dist_gsm, cex = 0.2, col = cols[3])
+points(qual_df$avg_time, qual_df$quot_dist_gsm, cex = 0.2, col = cols[2])
+axis(2, at = -5:5, labels = 10^(-5:5))
+abline(h = 0, lty = 2, col = gray(0.3))
+
+lines(smooth.spline(qual_df$act_time, qual_df$quot_dist_gsm), lwd = 2, col = cols[4])
+lines(smooth.spline(qual_df$avg_time, qual_df$quot_dist_gsm), lwd = 2, col = cols[1])
+legend("topright", lwd = 2, col = cols[c(1, 4)], 
+       legend = c("Uniformely distributed", "Actual"))
+dev.off()
+
+jpeg("figures/dist_quality_gps.jpeg", quality = 100, height = 400, width = 600)
+plot(NULL, xlim = c(0, 0.6), ylim = c(-5, 5),
+     yaxt = 'n',
+     xlab = "Average fraction of day covered by a CDR",
+     ylab = "Quotient of Distances (log scale)",
+     main = "Deterioration of distances estimation with 
+decreasing number of CDR (GPS)")
+points(qual_df$act_time, qual_df$quot_dist_gps, cex = 0.2, col = cols[3])
+points(qual_df$avg_time, qual_df$quot_dist_gps, cex = 0.2, col = cols[2])
+axis(2, at = -5:5, labels = 10^(-5:5))
+abline(h = 0, lty = 2, col = gray(0.3))
+
+lines(smooth.spline(qual_df$act_time, qual_df$quot_dist_gps), lwd = 2, col = cols[4])
+lines(smooth.spline(qual_df$avg_time, qual_df$quot_dist_gps), lwd = 2, col = cols[1])
+legend("topright", lwd = 2, col = cols[c(1, 4)], 
+       legend = c("Uniformely distributed", "Actual"))
+dev.off()
