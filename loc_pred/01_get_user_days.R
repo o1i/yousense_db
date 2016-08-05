@@ -1,5 +1,5 @@
 get_user_days <- function(user_, nt_, level_ = "CDR", fill_avg_dist = 300,
-                          hour_shift = 2){
+                          hour_shift = 3){
   # This function fetches the data to use by user.
   # user_  is the number of the user
   # nt_    is the number of time intervals that a day should be split into
@@ -177,12 +177,18 @@ get_user_days_c <- function(user_, nt_, level_ = "CDR", fill_avg_dist = 300,
                        minPts = clust_minpt_frac * nrow(t))
   all_masts$cluster <- mast_clust$cluster[match(rownames(all_masts), t$id_masts)]
   
-  # locs <- SpatialPoints(all_masts[, c("mast_x", "mast_y")], CRS("+init=epsg:3301")) %>%
-  #   spTransform( CRS("+init=epsg:4326"))
-  # cols <- c("red",brewer.pal(length(unique(all_masts$cluster)) - 1, "Set3"))
-  # leaflet() %>% addTiles() %>% addCircleMarkers(data = locs, color = cols[all_masts$cluster + 1], opacity = 1,
-  #                                               popup = rownames(all_masts))
-  
+  locs <- SpatialPoints(all_masts[, c("mast_x", "mast_y")], 
+                        CRS("+init=epsg:3301")) %>%
+    spTransform( CRS("+init=epsg:4326"))
+  inds <- order(all_masts$cluster)
+  cols <- c("#666666",brewer.pal(length(unique(all_masts$cluster)) - 1, "Set3"))
+  # leaflet() %>% addTiles() %>%
+  #   addCircleMarkers(data = locs[inds],
+  #                    color = cols[all_masts$cluster + 1][inds],
+  #                    opacity = 1,
+  #                    popup = rownames(all_masts)[inds]) %>%
+  #   add_colored_points(user_, 10, places_info)
+
   # --- Get cluster polygons
   library(sp)
   library(rgeos)
@@ -202,8 +208,8 @@ get_user_days_c <- function(user_, nt_, level_ = "CDR", fill_avg_dist = 300,
     # Polygons(list(Polygon(pts[c(hull, hull[1]), ], hole = F)), ID = cl_)
   }) %>%
     do.call(what = rbind)  # %>% spTransform(CRS("+init=epsg:4326"))-> sp3
-    # SpatialPolygons(proj4string = CRS("+init=epsg:3301")) %>% 
-    # gBuffer(byid = T, width = 300) %>% 
+    # SpatialPolygons(proj4string = CRS("+init=epsg:3301")) %>%
+    # gBuffer(byid = T, width = 300) %>%
     # spTransform(CRS("+init=epsg:4326"))
   
   # leaflet() %>% addTiles() %>% addPolygons(data = sp1) %>% addPolygons(data = sp2, col = "red") %>% addPolygons(data = sp3, col = "green", popup = names(sp3))

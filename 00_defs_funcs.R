@@ -671,6 +671,24 @@ fill_vector <- function(v){
   v[i2[cbind(apply(i, 2, which.min), 1:length(v))]]
 }
 
+# --- Add Leaflet-Layer of important GPS points --------------------------------
+add_colored_points <- function(m, user_, no_, places_info_){
+  if(is.null(m)){
+    m <- leaflet() %>% addTiles()
+  }
+  points <- subset(places_info_[[as.character(user_)]][["colored_places"]],
+                   rank(-days) <=no_)
+  latlon <-  (do.call(what = rbind, strsplit(points$name, " ", fixed = T)) %>%
+    as.numeric() %>% matrix(ncol = 2) %>%
+    SpatialPoints(proj4string = CRS("+init=epsg:3301")) %>%
+    spTransform(CRS("+init=epsg:4326")))@coords
+  addMarkers(m, latlon[, 1], latlon[, 2], popup = as.character(points$days)) %>%
+    addCircleMarkers(latlon[, 1], latlon[, 2], 
+                     popup = as.character(points$days),
+                     opacity = 1, color = points$col, fillColor = points$col,
+                     fillOpacity = 1)
+}
+
 # ------------------------------------------------------------------------------
 # --- Functions for clustering etc ---------------------------------------------
 # ------------------------------------------------------------------------------

@@ -1,8 +1,8 @@
 vis_gt <- function(user_, eps_coords = 30, minpts_coords = 4, nt_ = 6,
-                   hour_shift = 2, save_stuff = T){
+                   hour_shift = 3, save_stuff = F){
   library(dbscan)
   library(colorspace)
-  gt_ <- get_segments_gt(user, hour_shift = hour_shift, include_moves = T)
+  gt_ <- get_segments_gt(user_, hour_shift = hour_shift, include_moves = T)
   
   # --- Snap coords to cluster centers -----------------------------------------
   get_name <- function(df_){apply(cbind(df_[, "x_mean"], df_[, "y_mean"]), 
@@ -183,6 +183,33 @@ vis_gt <- function(user_, eps_coords = 30, minpts_coords = 4, nt_ = 6,
            pch = (2:3)[ind_inc + 1])
     if(save_stuff) dev.off()
   }
+  if(save_stuff) jpeg(height = 500, width = 2000, quality = 100, 
+                      file = paste0("figures/byuser/usage_vis_u", user_, 
+                                    "_all.jpeg"))
+  plot(NULL, ylim = c(1, 0), xlim = c(breaks[1, 1], breaks[nrow(breaks), 2]), 
+       ylab = "Time of day", 
+       xlab = "Date",
+       yaxt = "n", xaxt = "n", 
+       main = paste0("Visualisation of user ", user_))
+  axis(2, at = seq(0, 1, l = nt_ + 1), 
+       labels = round((seq(0, 1, l = nt_ +1) * (24) + hour_shift) %% 24))
+  axis(1, at = doy_first, labels = c("J", "F", "M", "A", "M", "J", "J", "A",
+                                     "S", "O", "N", "D", "J"))
+  rect(saturdays - 1, -1, saturdays + 1, 2, border = NA, lwd = 2, 
+       col = "#999999FF")
+  
+  # --- Add the days
+  add_day <- function(doy_){
+    df_ <- gt_[[doy_]]
+    rect(as.numeric(doy_) - 1, df_$f_start, as.numeric(doy_), df_$f_end,
+         density = - 1, col = df_$col, border = NA)
+  }
+  sapply(names(gt_), add_day)
+  box()
+  
+  points(cdr$day - 0.5, cdr$f_start, lwd = 2, col = (2:3)[ind_inc + 1],
+         pch = (2:3)[ind_inc + 1])
+  if(save_stuff) dev.off()
   
   
   # --- Get the regression stuff -----------------------------------------------
