@@ -1,6 +1,7 @@
 pred_cluster_v3 <- function(days_, nt_ = 24, min_pts = 4, 
                          seen_masts_, scale_ = 1, pen_ = 0.5, thresh_ = 0.27,
-                         save_stuff = F, eps_ = 0.05, minpts_ = 5){
+                         save_stuff = F, eps_ = 0.05, minpts_ = 5,
+                         dirpath_ = "figures/byuser/"){
  
  # --- Distance functions needed for clustering
  mast_dist <- function(m1, m2, seen_masts_, a = 2.6289316954, b = 0.0002054995,
@@ -74,7 +75,7 @@ pred_cluster_v3 <- function(days_, nt_ = 24, min_pts = 4,
    }, mc.cores = 4))
    
    if(save_stuff) jpeg(width = 500, height = 500, quality = 100, 
-                       file = paste0("figures/byuser/distmat_u", user, "nt_", nt_, "v3.jpeg"))
+                       file = paste0(dirpath_, "distmat_u", user, "nt_", nt_, "v3.jpeg"))
    image(t(distmat), main = paste("User", user, "nt =", nt_), zlim = c(0, 1), ylim = c(1, 0),
          xaxt = 'n', yaxt = 'n')
    if(save_stuff) dev.off()

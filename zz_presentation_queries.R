@@ -302,3 +302,67 @@ dev.off()
 #          main = paste("i=", i))
 #   }
 # }
+
+# ------------------------------------------------------------------------------
+# --- Sequential clustering
+# ------------------------------------------------------------------------------
+# Aim: demonstrate the necessity of multiple epsilon thresholds
+set.seed(21587)
+radii <- matrix(c(0, 0.3, 0.33, 0.4, 0.45, 0.5, 0.6, 0.7, 0.85, 1), 
+                ncol = 2, byrow = T)
+N <- 5000
+points <- matrix(runif(2 * N, -1, 1), 
+                 ncol = 2, dimnames = list(NULL, c("X", "Y")))
+rad <- sqrt(points[, 1]^2 + points[, 2]^2)
+ind <- rad < 1
+points <- points[ind, ]
+plot(points)
+
+M <- 750
+p1 <- (points[1:M, ]  / 2                + rep(c(-1, 0), each = M))
+p2 <- (points[(M + 1):(3 * M), ]         + rep(c(-1, 0), each = 2 * M))
+p3 <- (points[(3 * M + 1):(4 * M), ]     + rep(c( 1, 0), each = M))
+points_2 <- rbind(p1, p2, p3)
+plot(points_2)
+
+cols <- c("#000000", "#377eb8", "#4daf4a", "#e41a1c")
+library(dbscan)
+jpeg(file = "figures/epsilon_choice.jpeg",
+     height = 500, width = 600, quality = 100)
+par(mfrow = c(2, 2), oma = c(1, 0, 2.5, 0), mar = c(2, 1, 1, 1))
+m1 <- dbscan(points_2, eps =0.1, minPts = 40)
+m2 <- dbscan(points_2, eps =0.178, minPts = 40)
+m3 <- dbscan(points_2, eps =0.4, minPts = 40)
+plot(points_2, col = cols[c(1, 4)][m1$cluster + 1], xlim = c(-2, 3), 
+     xaxt = "n", yaxt = "n", asp = 1)
+mtext("(a)", side = 1, line = 1)
+  text(2, 0.5, expression(epsilon, "  = 0.1"), pos = 4)
+plot(points_2, col = cols[c(1, 3)][m2$cluster + 1], xlim = c(-2, 3), 
+     xaxt = "n", yaxt = "n", asp = 1)
+mtext("(b)", side = 1, line = 1)
+  text(2, 0.5, expression(epsilon, "  = 0.18"), pos = 4)
+plot(points_2, col = cols[c(1, 2)][m3$cluster + 1], xlim = c(-2, 3), 
+     xaxt = "n", yaxt = "n", asp = 1)
+mtext("(c)", side = 1, line = 1)
+  text(2, 0.5, expression(epsilon, "  = 0.4"), pos = 4)
+points_3 <- points_2[m1$cluster == 0, ]
+m4 <- dbscan(points_3, eps = 0.178, minPts = 40)
+points_4 <- points_3[m4$cluster == 0, ]
+m5 <- dbscan(points_4, eps = 0.4, minPts = 40)
+mc5 <- max(m5$cluster)
+mc4 <- max(m4$cluster)
+  plot(points_4, col = cols[m5$cluster + 1], xlim = c(-2, 3), 
+       xaxt = "n", yaxt = "n", asp = 1)
+  mtext("(d)", side = 1, line = 1)
+points(points_3[m4$cluster > 0, ], 
+       col = cols[m4$cluster[m4$cluster > 0] + 1 + mc5])
+points(points_2[m1$cluster > 0, ], 
+       col = cols[m1$cluster[m1$cluster > 0] + 1 + mc5 + mc4])
+text(c(2, 2, 2), c(0.5, 0.3, 0.1), 
+     c(expression("1)"~epsilon~"= 0.1"), 
+       expression("2)"~epsilon~"= 0.18"),
+       expression("3)"~epsilon~"= 0.4")),  
+     pos = 4)
+mtext("Problem of Epsilon choice and a sequential alternative", 
+      outer = TRUE, cex = 1.5)
+dev.off()
