@@ -61,10 +61,10 @@ if(!file.exists(filename) | force_fit){
   for(ii in users){
     print(paste("User", ii))
 
-    n_routines <- 2 + block_number(block_number(user, block_size), 1, 2) * 2
-    n_masts    <- 5 + block_number(block_number(user, block_size), 2, 2) * 10
-    equal      <- 0 + block_number(block_number(user, block_size), 4, 2) * 0.4
-    scale      <- 3 + block_number(block_number(user, block_size), 8, 2) * 6
+    n_routines <- 2 + block_number(block_number(ii, block_size), 1, 2) * 2
+    n_masts    <- 5 + block_number(block_number(ii, block_size), 2, 2) * 10
+    equal      <- 0 + block_number(block_number(ii, block_size), 4, 2) * 0.4
+    scale      <- 3 + block_number(block_number(ii, block_size), 8, 2) * 6
     
     user_data[[ii]] <- create_user_realisations(n_ = 200, 
                                                 n_routines_ = n_routines, 
@@ -74,7 +74,8 @@ if(!file.exists(filename) | force_fit){
                                                 hour_shift_ = hour_shift,
                                                 mean1_ = 3,
                                                 mean2_ = 4, 
-                                                lim_ = 500,
+                                                lim_ = 1000 - 500 * 
+                                                  (n_masts > 10),
                                                 min_ = 3, 
                                                 max_ = 7,  
                                                 equal_ = equal, 
