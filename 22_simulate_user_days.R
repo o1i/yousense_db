@@ -76,7 +76,7 @@ create_routine <- function(masts_, times_, durations_, nt_, home_ = NA){
   
   # output:
   #         a vector of length nt_ with a typical day
-  places <- sample(masts_, length(times_), replace = F)
+  places <- sample(masts_, length(times_), replace = T)
   outvec <- rep(home_, nt_)
   for(i in seq(along=times_)){
     outvec[times_[i]:(times_[i] + durations_[i] - 1)] <- places[i]
@@ -170,11 +170,41 @@ create_routine_2 <- function(masts_, nt_, mean1_, mean2_, home_,
   num <- get_no_of_stops(count_ = 1, mean_ = mean1_, min_ = min_, max_ = max_)
   durations <- pmin(9, get_durations_of_stops(count_ = num, mean_ = mean2_))
   starts <- get_starts_of_stops(durations_ = durations, nt_, hour_shift_)
-  places <- sample(setdiff(masts_$id_masts, home_), num)
+  places <- sample(setdiff(masts_$id_masts, home_), num, replace = T)
   check <- masts_check(mast_list_ = c(places, home_), masts_ = masts_, lim_)
   ii <- 0
   while(!check & ii < 100){
-    places <- sample(masts_$id_masts, num)
+    places <- sample(masts_$id_masts, num, replace = T)
+    check <- masts_check(mast_list_ = c(places, home_), masts_ = masts_, lim_)
+    ii <- ii + 1
+  }
+  return(data.frame(id_masts = places, 
+                    start_index = starts, 
+                    duration =durations,
+                    stringsAsFactors = F))
+}
+
+create_routine_3 <- function(masts_, nt_, home_, 
+                             hour_shift_ = 3,
+                             lim_ = 1000){
+  # Creates the routines in list format
+  
+  # input:
+  #         masts_      dataframe of available masts
+  #         nt_         length of a vector
+  #         home_       id of home. needed for the distance check
+  #         lim_        minimum distance between two locations
+  
+  # output:
+  #         list with the deviations (id_masts, start_index, duration)
+  num <- 3
+  durations <- c(5, 5, 4)
+  starts <- c(4, 9, 14)
+  places <- sample(setdiff(masts_$id_masts, home_), num, replace = T)
+  check <- masts_check(mast_list_ = c(places, home_), masts_ = masts_, lim_)
+  ii <- 0
+  while(!check & ii < 100){
+    places <- sample(masts_$id_masts, num, replace = T)
     check <- masts_check(mast_list_ = c(places, home_), masts_ = masts_, lim_)
     ii <- ii + 1
   }
@@ -212,7 +242,7 @@ get_noise <- function(masts_, count_, fixed_ = T, nt_ = 24, hour_shift_ = 3){
   # output:
   #         data frame with id_masts|hour
   if(!fixed_) count_ <- rpois(1, count_)
-  masts <- sample(masts_, count_)
+  masts <- sample(masts_, count_, replace = T)
   indices <- hour_to_nt(floor(runif(count_, 6, 22)), 
                         nt_ = nt_, hour_shift_ = hour_shift_)
   return(data.frame(id_masts = masts, index = indices))
@@ -284,6 +314,15 @@ get_user_day <- function(cdr_gt_, calling_probs_, scale_ = 1){
   n <- length(calling_probs_)
   outvec <- rep(NA, length(cdr_gt_))
   ind <- runif(length(calling_probs_$p)) <= calling_probs_$p * scale_
+  check <- any(ind)
+  doom <- 0
+  while(!check & doom <=100){
+    ind <- runif(length(calling_probs_$p)) <= calling_probs_$p * scale_
+    check <- any(ind)
+    doom = doom + 1
+    if(doom == 100) print("Calling probs too small!")
+  }
+  
   outvec[ind] <- cdr_gt_[ind]
   return(outvec)
 }
@@ -344,11 +383,13 @@ create_user_realisations <- function(n_, n_routines_, n_masts_,
   
   # --- Establish the routines
   home <- sample(masts_$id_masts, 1)
-  available_masts <- sample(setdiff(masts_$id_masts, home), n_masts_)
+  available_masts <- sample(setdiff(masts_$id_masts, home), 
+                            min(nrow(masts_) - 1, n_masts_))
   check <- masts_check(available_masts, masts_, lim_)
   doom <- 0
   while(!check & doom <= 100){
-    available_masts <- sample(setdiff(masts_$id_masts, home), n_masts_)
+    available_masts <- sample(setdiff(masts_$id_masts, home), 
+                              min(nrow(masts_) - 1, n_masts_))
     check <- masts_check(available_masts, masts_, lim_)
     doom <- doom + 1
     if(doom == 100) print("No suitable set of masts was found")
@@ -357,11 +398,15 @@ create_user_realisations <- function(n_, n_routines_, n_masts_,
   routines <- as.list(1:(n_routines_))
   for(ii in 1:n_routines_){
     routines[[ii]] <- 
-      create_routine_2(subset(masts_, id_masts %in% c(home, available_masts)), 
-                       nt_, mean1_, mean2_, 
+      # create_routine_2(subset(masts_, id_masts %in% c(home, available_masts)), 
+      #                  nt_, mean1_, mean2_, 
+      #                  home_ = home,
+      #                  hour_shift_, lim_,
+      #                  min_ = min_, max_ = max_)
+      create_routine_3(subset(masts_, id_masts %in% c(home, available_masts)), 
+                       nt_,
                        home_ = home,
-                       hour_shift_, lim_,
-                       min_ = min_, max_ = max_)
+                       hour_shift_, lim_)
   }
   masts_so_far <- lapply(routines[1:n_routines_], function(df){
     df$id_masts
@@ -369,7 +414,7 @@ create_user_realisations <- function(n_, n_routines_, n_masts_,
   
   # --- Create realisations
   routines_taken <- sample(n_routines_, n_, replace = T, 
-                           prob = pmax(0.2, exp(-(1:n_routines)/2)))
+                           prob = pmax(0.2, exp(-(1:n_routines_)/2)))
   simulated_days <- 
     t(sapply(routines[routines_taken], 
            function(df){
@@ -398,20 +443,21 @@ create_user_realisations <- function(n_, n_routines_, n_masts_,
   ))
 }
 
-display_routines <- function(routines_, nt_ = 24){
+display_routines <- function(routines_, nt_ = 24, masts_ = NULL){
   # Graphically displays routines
   
   # input:
   #         routines_   a list of routines (v2 format)
   #         nt_         length of daily vectors
+  #         masts_      optional argument. if given, a map is drawn
   
   # output:
   #         none, but a plot is produced showing the routines
   library(RColorBrewer)
-  masts <- unique(lapply(routines_, function(df) df$id_masts) %>% 
+  masts. <- unique(lapply(routines_, function(df) df$id_masts) %>% 
                               do.call(what = c))
   cols <- colorRampPalette(c("red", "yellow", "green", "blue", "turquoise", 
-                             "gray", "purple"))(length(masts))
+                             "gray", "purple"))(length(masts.))
   plot(NULL, xlim = c(0, nt_), ylim = c(0, length(routines_)),
        xlab = "Index", ylab = "Routine Number",
        main = "Routines Visualisation")
@@ -421,10 +467,35 @@ display_routines <- function(routines_, nt_ = 24){
       for(jj in 1:nrow(routine)){
         rect(routine[jj, "start_index"], ii - 1, 
              routine[jj, "start_index"] + routine[jj, "duration"], ii,
-             col = cols[which(routine[jj, "id_masts"] == masts)])
+             col = cols[which(routine[jj, "id_masts"] == masts.)])
       }
     }
   }
+  if(!is.null(masts_)){
+    return(leaflet() %>% addTiles() %>% 
+      addCircleMarkers(lng = masts_[masts., "lon"], 
+                       lat = masts_[masts., "lat"], 
+                       col = cols))
+  }
   return(NULL)
+}
+
+block_number <- function(n_, p_, m_ = NULL){
+  # number integer divided by block size (optional: modulo a number)
+  
+  # input:
+  #         n_          number whose block number is of interest
+  #         p_          block size
+  #         m_          modulus that the block index should be taken by
+  
+  # output:
+  #         the p_-block index of n_ (modulo m_)
+  
+  # --- Establish the routines
+  if(is.null(m_)){
+    (n_-1)%/%p_+1
+  }else{
+    ((n_-1)%/%p_+1) %% m_
+  }
 }
 

@@ -13,6 +13,7 @@ library(reshape2)
 library(plyr)
 source("00_defs_funcs.R")
 source("22_simulate_user_days.R")
+source("23_evaluate_user_days.R")
 lapply(list.files("loc_pred", full.names = T), source)
 library(leaflet)
 library(parallel)
@@ -20,11 +21,16 @@ library(dbscan)
 
 connect(pw = scan("nosafe.txt", what = "character"))
 
-initialise <- function(obj_name, filename, init){
+initialise <- function(obj_name, filename, init, force_new_ = F){
   if(file.exists(filename)){
-    load(filename)
-    print(paste(filename, "loaded"))
-    return(get(obj_name))
+    if(force_new_){
+      file.remove(filename)
+      init
+    }else{
+      load(filename)
+      print(paste(filename, "loaded"))
+      return(get(obj_name))
+    }
   }else{
     init
   }
@@ -33,8 +39,11 @@ initialise <- function(obj_name, filename, init){
 force_fit <- T
 save_stuff <- T
 eval_stuff <- T
+force_new <- T
 
-users <- 1:50
+block_size <- 20
+num_blocks <- 16
+users <- 1:(block_size * num_blocks)
 
 # ------------------------------------------------------------------------------
 # --- Create the data
@@ -46,80 +55,30 @@ masts <- get_masts_of_area(x_ = 26.7231014,
                            y_ = 58.3784483, 
                            buffer_ = 10000)
 filename = "simulation/user_data.rda"
+
+
 if(!file.exists(filename) | force_fit){
   for(ii in users){
     print(paste("User", ii))
-    if(ii <= 10){
-      user_data[[ii]] <- create_user_realisations(n_ = 200, 
-                                                  n_routines_ = 6, 
-                                                  n_masts_ = 10,
-                                                  masts_ = masts, 
-                                                  nt_ = 24, 
-                                                  hour_shift_ = hour_shift,
-                                                  mean1_ = 3,
-                                                  mean2_ = 3, 
-                                                  lim_ = 1000,
-                                                  min_ = 0, 
-                                                  max_ = 4,  
-                                                  equal_ = 0.3, 
-                                                  scale_ = 5)
-    }else if(ii <= 20){
-      user_data[[ii]] <- create_user_realisations(n_ = 200, 
-                                                  n_routines_ = 3, 
-                                                  n_masts_ = 10,
-                                                  masts_ = masts, 
-                                                  nt_ = 24, 
-                                                  hour_shift_ = hour_shift,
-                                                  mean1_ = 3,
-                                                  mean2_ = 3, 
-                                                  lim_ = 1000,
-                                                  min_ = 0, 
-                                                  max_ = 4,  
-                                                  equal_ = 0.3, 
-                                                  scale_ = 7)
-    }else if(ii <= 30){
-      user_data[[ii]] <- create_user_realisations(n_ = 200, 
-                                                  n_routines_ = 6, 
-                                                  n_masts_ = 10,
-                                                  masts_ = masts, 
-                                                  nt_ = 24, 
-                                                  hour_shift_ = hour_shift,
-                                                  mean1_ = 5,
-                                                  mean2_ = 3, 
-                                                  lim_ = 1000,
-                                                  min_ = 0, 
-                                                  max_ = 6,  
-                                                  equal_ = 0.3, 
-                                                  scale_ = 6)
-    }else if(ii <= 40){
-      user_data[[ii]] <- create_user_realisations(n_ = 200, 
-                                                  n_routines_ = 10, 
-                                                  n_masts_ = 6,
-                                                  masts_ = masts, 
-                                                  nt_ = 24, 
-                                                  hour_shift_ = hour_shift,
-                                                  mean1_ = 3,
-                                                  mean2_ = 4, 
-                                                  lim_ = 1000,
-                                                  min_ = 0, 
-                                                  max_ = 6,  
-                                                  equal_ = 0.3, 
-                                                  scale_ = 5)
-    }else{
-      user_data[[ii]] <- create_user_realisations(n_ = 200, 
-                                                  n_routines_ = 3, 
-                                                  n_masts_ = 3,
-                                                  masts_ = masts, 
-                                                  nt_ = 24, 
-                                                  hour_shift_ = hour_shift,
-                                                  mean1_ = 2,
-                                                  mean2_ = 4, 
-                                                  lim_ = 2000,
-                                                  min_ = 1, 
-                                                  max_ = 3, 
-                                                  equal_ = 0.3, 
-                                                  scale_ = 4)
-    }
+
+    n_routines <- 2 + block_number(block_number(user, block_size), 1, 2) * 2
+    n_masts    <- 5 + block_number(block_number(user, block_size), 2, 2) * 10
+    equal      <- 0 + block_number(block_number(user, block_size), 4, 2) * 0.4
+    scale      <- 3 + block_number(block_number(user, block_size), 8, 2) * 6
+    
+    user_data[[ii]] <- create_user_realisations(n_ = 200, 
+                                                n_routines_ = n_routines, 
+                                                n_masts_ = n_masts,
+                                                masts_ = masts, 
+                                                nt_ = 24, 
+                                                hour_shift_ = hour_shift,
+                                                mean1_ = 3,
+                                                mean2_ = 4, 
+                                                lim_ = 500,
+                                                min_ = 3, 
+                                                max_ = 7,  
+                                                equal_ = equal, 
+                                                scale_ = scale)
     
     for(jj in 1:length(user_data[[ii]][["gt_formatted"]])){
       user_data[[ii]][["gt_formatted"]][[jj]]$uid <- ii
@@ -129,10 +88,12 @@ if(!file.exists(filename) | force_fit){
 }else{
   load(filename)
 }
-display_routines(user_data[[48]]$routines)
+display_routines(routines_ = user_data[[42]]$routines, 
+                 nt_ = 24,
+                 masts_ = masts)
 
 
-for(duration in c(30, 60, 100, 200)){
+for(duration in c(200, 60)){
 user_chars <- initialise("user_chars", paste0("simulation/user_chars_",
                                               hour_shift, "_", nt,  
                                               "_d", duration,
@@ -141,9 +102,10 @@ all_evals <-  initialise("all_evals", paste0("simulation/all_evals_",
                                              hour_shift, "_", nt,
                                              "_d", duration,
                                              ".rda"), list())
-# places_info <-  initialise("places_info", paste0("simulation/places_info_", 
-#                                                  hour_shift, "_", nt, 
-#                                   ".rda"), list())
+all_stats <-  initialise("all_stats", paste0("simulation/all_stats_",
+                                             hour_shift, "_", nt,
+                                             "_d", duration,
+                                             ".rda"), list())
 daily_infos <- initialise("daily_infos", paste0("simulation/daily_infos_",
                                                 hour_shift, "_", nt, 
                                                 "_d", duration,
@@ -181,7 +143,9 @@ for(user in users){
                                     save_stuff = save_stuff, 
                                     eps_ = 0.05, 
                                     minpts_ = 4,
-                                    dirpath_ = "simulation/figures/byuser/")
+                                    dirpath_ = 
+                                      paste0("simulation/figures/byuser/d", 
+                                             duration, "_"))
       # p_cluster_v1 <- pred_cluster_v1(days_ = days)
       p_freq <- pred_freq(days)
       if(save_stuff)  save("p_cluster2", "p_freq", file = filename)
@@ -214,6 +178,27 @@ for(user in users){
                               days_ = days)
                           })
       names(eval_dist) <- c("s_cluster2", "s_freq")
+      
+      # --- get TD and RoG
+      lcd <- apply(user_data[[user]]$gt[1:duration, ] == p_cluster2, 1, mean)
+      lcf <- apply(user_data[[user]]$gt[1:duration, ] == p_freq,     1, mean)
+      stats <- data.frame(uid = user,
+                          td_damocles = get_dist_travelled(p_cluster2, masts),
+                          rog_damocles = get_rog(p_cluster2, masts),
+                          td_freq = get_dist_travelled(p_freq, masts),
+                          rog_freq = get_rog(p_freq, masts),
+                          td_gt = get_dist_travelled(user_data[[ii]]$gt[
+                            1:duration, ], masts),
+                          rog_gt = get_rog(user_data[[ii]]$gt[1:duration, ], 
+                                           masts),
+                          label_correctness_dam = lcd,
+                          label_correctness_freq = lcf,
+                          recon_err_dam  = eval_dist[["s_cluster2"]]$avg_dist,
+                          recon_err_freq = eval_dist[["s_freq"]]$avg_dist,
+                          num_cdr = apply(user_data[[user]]$obs, 
+                                           1, function(v_){sum(!is.na(v_))})
+                          )
+      
       # 
       # # --- Maximally possible accuracy
       # eval_handover <- day_comp_handover(gt_ = gt_raw)
@@ -274,6 +259,12 @@ for(user in users){
                           file = paste0("simulation/all_evals_", 
                                         hour_shift, "_", nt,  "_d", duration,
                                         ".rda"))
+      
+      all_stats[[as.character(user)]] <- stats
+      if(save_stuff) save(all_stats, 
+                          file = paste0("simulation/all_stats_", 
+                                        hour_shift, "_", nt,  "_d", duration,
+                                        ".rda"))
     }else{
       load(paste0("simulation/daily_infos_", hour_shift, "_", nt,
                   "_d", duration, ".rda"))
@@ -281,9 +272,12 @@ for(user in users){
                   "_d", duration, ".rda"))
       load(paste0("simulation/all_evals_",   hour_shift, "_", nt, 
                   "_d", duration, ".rda"))
+      load(paste0("simulation/all_stats_",   hour_shift, "_", nt, 
+                  "_d", duration, ".rda"))
       daily_info <- daily_infos[[as.character(user)]]
       user_char <- user_chars[as.character(user), ]
       all_eval <- all_evals[[as.character(user)]]
+      stats <- all_stats[[as.character(user)]]
     }
     # --------------------------------------------------------------------------
     # --- Plots
@@ -339,3 +333,49 @@ for(user in users){
 }  # User loop
 }  # duration loop
 rm(user_chars, all_evals, daily_infos)
+
+# ------------------------------------------------------------------------------
+# --- Evaluaiton
+# -----------------------------------------------------------------------------
+
+duration <- 200
+load(paste0("simulation/all_stats_",   hour_shift, "_", nt, 
+            "_d", duration, ".rda"))
+
+
+stats_frequent <- t(sapply(names(all_stats), function(n){
+  df_ <- subset(all_stats[[n]], daily_infos[[n]]$count >= 6)
+  c(mean(df_$td_damocles / df_$td_gt), mean(df_$td_freq / df_$td_gt), 
+    mean(df_$rog_damocles / df_$rog_gt), mean(df_$rog_freq / df_$rog_gt))
+}))
+
+stats_rare <- t(sapply(names(all_stats), function(n){
+  df_ <- subset(all_stats[[n]], daily_infos[[n]]$count <= 3)
+  c(mean(df_$td_damocles / df_$td_gt), mean(df_$td_freq / df_$td_gt), 
+    mean(df_$rog_damocles / df_$rog_gt), mean(df_$rog_freq / df_$rog_gt))
+}))
+
+stats_mid <- t(sapply(names(all_stats), function(n){
+  df_ <- subset(all_stats[[n]], 
+                daily_infos[[n]]$count > 3 & daily_infos[[n]]$count < 6)
+  c(mean(df_$td_damocles / df_$td_gt), mean(df_$td_freq / df_$td_gt), 
+    mean(df_$rog_damocles / df_$rog_gt), mean(df_$rog_freq / df_$rog_gt))
+}))
+
+stats_collection <- t(sapply(all_stats, function(df_){
+  c(mean(df_$td_damocles / df_$td_gt), mean(df_$td_freq / df_$td_gt), 
+    mean(df_$rog_damocles / df_$rog_gt), mean(df_$rog_freq / df_$rog_gt))
+}))
+
+test_df <- stats_rare
+par(mfrow = c(2, 1))
+  plot(log10(test_df[, 1]), col = 3, lwd = 2, type = "p", 
+       main = "Distance", ylab = "Proportion")
+points(log10(test_df[, 2]), col = 2, lwd = 2)
+abline(v = 1:10 * 10 + 0.5, h = 0)
+  plot(log10(test_df[, 3]), col = 3, lwd = 2, pch = 2, type = "p", 
+       main = "Rog", ylab = "Proportion")
+points(log10(test_df[, 4]), col = 2, lwd = 2, pch = 2)
+abline(v = 1:10 * 10 + 0.5, h =0)
+
+
